@@ -6,14 +6,39 @@ Created on Fri Mar 27 08:42:02 2020
 @author: marek
 """
 
+import os
 import time
 import collections
+import pickle
+import gffutils
+from Bio import SeqIO
 from IPython.display import clear_output
+from multiprocessing import Pool
 
-# Global variable to be imported
-resultDict = collections.defaultdict(list)
-total = 0
+
+# Global variables to be initiated
+resultSNRs = collections.defaultdict(list)
+resultSNRcounts = collections.defaultdict(int)
+totalPieces = 0
 processed = 0
+# Dict of complementary letters to consider both
+compDict = {'A':'T', 'T':'A', 'C':'G', 'G':'C', 'N':'N'}
+# Handling of small letters in the sequence
+capsDict = {
+    'A':('a', 'A'),
+    'T':('t', 'T'),
+    'C':('c', 'C'),
+    'G':('g', 'G'),
+    'N':'N'
+    }
+# A dictionary of letters to avoid for splitting, given the base sought
+avoidSplits = {
+    'A':('a', 'A', 't', 'T'),
+    'T':('a', 'A', 't', 'T'),
+    'C':('c', 'C', 'g', 'G'),
+    'G':('c', 'C', 'g', 'G'),
+    }
+
 
 class SNR:
     """An object that stores information about a Single Nucleotide Repeat
@@ -29,7 +54,7 @@ class SNR:
         self.start = start              # int, start of the Site
         self.end = end                  # int, end of the Site
         self.mism = mism                # int, number of mismatches 
-        self.strand = strand        # bool: T (+) or F (-)
+        self.strand = strand            # bool: T (+) or F (-)
         self.feat = feat                # set, GFFdb features for the
                                         #  respective strand, such as region,
                                         #  gene, exon, mRNA, CDS, etc.
@@ -46,9 +71,10 @@ class SNR:
             )
 
 
-
-def splitter(base, refseq, minlength = 1000000):
-    """
+def splitter(base, refseq, minlength = 5000000):
+    """Function to find splits in a given DNA sequence such that contigs of
+    the base in question are not interrupted
+    
     Parameters
     ----------
     base : (str)
@@ -56,7 +82,7 @@ def splitter(base, refseq, minlength = 1000000):
     refseq : (str)
         Reference sequence to be divided into splits.
     minlength : (int), optional
-        The minimum length for a split. The default is 1000000.
+        The minimum length for a split. The default is 5000000.
 
     Returns
     -------
@@ -67,13 +93,6 @@ def splitter(base, refseq, minlength = 1000000):
     # Initiate the list and the first split
     splits = []; first = 0; last = minlength
     
-    # Make a dictionary of letters to avoid for splitting
-    avoidSplits = {
-        'A':('a', 'A', 't', 'T'),
-        'T':('a', 'A', 't', 'T'),
-        'C':('c', 'C', 'g', 'G'),
-        'G':('c', 'C', 'g', 'G'),
-        }
     avoid = avoidSplits[base]
     
     # Generate valid splits until the last split exceeds length of the sequence
@@ -89,9 +108,46 @@ def splitter(base, refseq, minlength = 1000000):
     splits.append((first, len(refseq)))
     
     return splits
-    
 
-def findSNRs(base, refname, refseq, extent):
+def getSplits(base, fasta, minlength = 5000000, mincont = 5):
+    """Function that cuts up the genome into smaller pieces for parallel
+    processing.
+
+    Parameters
+    ----------
+    base : (str)
+        Base that is being sought for by findSNRs.
+    fasta : (str)
+        Location of the fasta file.
+    minlength : TYPE, optional
+        The minimum length for a splits. The default is 5000000.
+    mincont : TYPE, optional
+        The minimal length of the SNRs saved by findSNRs. The default is 5.
+
+    Returns
+    -------
+    pieces : (list)
+        [ pieces ]
+    """
+    
+    global totalPieces
+    
+    # Initiate a dictionary for splitters
+    pieces = []
+    # Keep genome open only as long as necessary
+    with open(fasta, "r") as genome:
+        for ch in SeqIO.parse(genome, 'fasta'):
+            splitters = splitter(base, str(ch.seq), minlength)
+            totalPieces += len(splitters)
+            for ext in splitters:
+                pieces.append(
+                    (base, ch.id, str(ch.seq)[ext[0]:ext[1]], ext, mincont)
+                    )
+    
+    return pieces
+
+    
+def findSNRs(base, refname, refseq, extent, minlen = 5):
     """Function to scan a given reference sequence (range) & find unique SNRs
     of given base type and length with given maximum number of mismatches
     allowed, such that the SNR contains mostly the primary bases and starts &
@@ -107,6 +163,9 @@ def findSNRs(base, refname, refseq, extent):
         Reference sequence or its part to be searched.
     extent : (tuple), optional
         The range of the sequence to search.
+    minlen : (int), optional
+        The minimal length of the SNRs saved. (Note that all SNRs will be stil
+        counted.) The default is 5.
 
     Returns
     -------
@@ -117,24 +176,14 @@ def findSNRs(base, refname, refseq, extent):
     """
     
     # Define the complement base to be sought
-    compDict = {'A':'T', 'T':'A', 'C':'G', 'G':'C', 'N':'N'}
     cBase = compDict[base]
-    # Handle small letters in the sequence
-    capsDict = {
-        'A':('a', 'A'),
-        'T':('t', 'T'),
-        'C':('c', 'C'),
-        'G':('g', 'G'),
-        'N':'N'
-        }
     
     # Initiate the dicts for SNRs
     lengthToSNRs = collections.defaultdict(list)
-    #lengthToSNRcounts = collections.defaultdict(int)
+    lengthToSNRcounts = collections.defaultdict(int)
     
     # Initialize trackers
     first = 0; truEnd = len(refseq)
-    
     
     # Keep scanning the sequence until the true end is reached
     while first < truEnd:
@@ -150,19 +199,25 @@ def findSNRs(base, refname, refseq, extent):
                 #  index of the range confirmed
                 while last < truEnd and refseq[last] in nonCaps:
                     last += 1
-                # Save the SNR into the dict by its length & break
-                lengthToSNRs[last - first].append(
-                    SNR(
-                        base,
-                        refseq[first:last],
-                        refname,
-                        first + extent[0],
-                        last + extent[0],
-                        0,
-                        b == base,
-                        None
+                # Calculate the length of the SNR
+                truLen = last - first
+                # Count the SNR by its length
+                lengthToSNRcounts[truLen] += 1
+                # If the size is sufficient, save the SNR into the dict by
+                #  its length & break
+                if truLen >= minlen:
+                    lengthToSNRs[truLen].append(
+                        SNR(
+                            base,
+                            refseq[first:last],
+                            refname,
+                            first + extent[0],
+                            last + extent[0],
+                            0,
+                            b == base,
+                            None
+                            )
                         )
-                    )
                 break
         # Move the first base to that which was tested last
         first = last
@@ -170,25 +225,38 @@ def findSNRs(base, refname, refseq, extent):
     # Announce finishing this sequence
     #print('Finished sequence {}[{}:{}]'.format(refname, extent[0], extent[1]))
     
-    return lengthToSNRs
+    return lengthToSNRs, lengthToSNRcounts
 
-
-def getFeatures(lengthToSNRs, db):
-    """Function that takes a list generated by findSNRs, looks up the set of
-    features for each SNR, and sorts the SNRs into a dictionary by their length
+def assignFeatures(lengthToSNRs, gff, db_out):
+    """Function that takes a dict generated by findSNRs and looks up & saves
+    the set of features for each SNR.
     
     Parameters
     ----------
-    SNRs : (list)
-        List of Single Nucleotide Repeats (SNRs).
-    db : (gffutils.FeatureDB)
-        Database of genomic features.
+    lengthToSNRs : (dict)
+        { length : [ SNRs ] }
+    gff : (str)
+        Location of the gff annotation file.
+    db_out : (str)
+        Location of the database file.
 
     Returns
     -------
-    lengthToSNRs : (defaultdict)
-        A dictionary of SNRs sorted by their length.
+    None.
     """
+    
+    # Connect to database; if it does not exist, create it from the gff first
+    if os.path.isfile(db_out):
+        db = gffutils.FeatureDB(db_out, keep_order = True)
+    else:
+        db = gffutils.create_db(
+            gff,
+            dbfn = db_out,
+            force = True,
+            merge_strategy = 'create_unique',
+            id_spec = ['ID', 'Name'],
+            verbose = True
+            )
     
     # Pre-calculate the length of the list
     length = 0
@@ -203,7 +271,7 @@ def getFeatures(lengthToSNRs, db):
             # Track progres through the SNRs
             i += 1
             # Calculate the current progress
-            progress = round(i/length, 2)
+            progress = round(i/length, 3)
             # If the new progress is different from the current
             if progress != current:
                 # Announce progress through the list
@@ -219,9 +287,6 @@ def getFeatures(lengthToSNRs, db):
                     strand = '+' if SNR.strand else '-'
                     )
                 }
-    
-    return lengthToSNRs
-
 
 def howLongSince(t_start):
     """Function that prints out the amount of time elapsed since t_start.
@@ -247,9 +312,8 @@ def howLongSince(t_start):
             )
         )
 
-    
 def collectResult(result):
-    """Callback function for pooled function mapping.
+    """Callback function for pooled function mapping. Takes only one input var.
     
     Parameters
     ----------
@@ -262,11 +326,91 @@ def collectResult(result):
     """
     global processed
     
-    # Go over the results in the dict and add them to the result dict
-    for length, SNRs in result.items(): resultDict[length].extend(SNRs)
+    SNRs, counts = result
+    # Go over the result dicts and add them to the respective dict
+    for length, SNRs in SNRs.items(): resultSNRs[length].extend(SNRs)
+    for length, count in counts.items(): resultSNRcounts[length] += count
     # Add to the global variable
     processed += 1
     # Announce progress
-    print('Processed split: {}/{}'.format(processed, total))
+    print('Processed split: {}/{}'.format(processed, totalPieces))
     # Clear output but wait until the next one appears
     clear_output(wait = True)
+    
+def saveSNRcsv(loc, base, lengthToSNRcounts):
+    """Saving the SNR count dictionary as a csv file.
+
+    Parameters
+    ----------
+    loc : (str)
+        Location of where the csv should be saved
+    lengthToSNRcounts : (dict)
+        { length : SNRcount }
+
+    Returns
+    -------
+    None.
+    """
+    with open(loc, 'w') as f:
+        # Write the header
+        line = 'poly{}/{} Length,Count\n'.format(base, compDict[base])
+        f.write(line)
+        for key in sorted(lengthToSNRcounts.keys()):
+            f.write('{},{}\n'.format(key, lengthToSNRcounts[key]))
+            
+def saveSNRpkl(loc, lengthToSNRs):
+    """Saving the SNR dictionary as a pkl file for later use.
+
+    Parameters
+    ----------
+    loc : (str)
+        Location of where the csv should be saved
+    lengthToSNRs : (dict)
+        { length : [ SNR ] }
+
+    Returns
+    -------
+    None.
+    """
+    with open(loc, 'wb') as f:
+        pickle.dump(lengthToSNRs, f)
+
+def loadSNRs(genome, base):
+    """Loading the SNR dictionary as a pkl file for further processing.
+
+    Parameters
+    ----------
+    genome : (str)
+        DESCRIPTION.
+    base : (str)
+        Identifies the base originally sought for.
+
+    Returns
+    -------
+    lengthToSNRs : (dict)
+        { length : [ SNR ] }
+    """
+    with open('{}_{}/{}.pkl'.format(genome, base, compDict[base]), 'rb') as f:
+        lengthToSNRs = pickle.load(f)
+    
+    return lengthToSNRs
+
+def processPool(pieces, cpus):
+    """Parallel processing of genome scanning.
+
+    Parameters
+    ----------
+    pieces : (list)
+        [ pieces ]
+    cpus : (int)
+        Number of cpus to be used in parallel.
+
+    Returns
+    -------
+    None.
+    """
+    pool = Pool(processes = cpus)
+    for p in pieces:
+        pool.apply_async(findSNRs, args = p, callback = collectResult)
+    pool.close()
+    pool.join()
