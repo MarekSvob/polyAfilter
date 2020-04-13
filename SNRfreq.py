@@ -111,7 +111,7 @@ def splitter(base, refseq, minlength = 10000000):
     
     return splits
 
-def getSplits(base, fasta, minlength = 10000000, mincont = 5):
+def getSplits(base, fasta, db, temp = '.', minlength = 10000000, mincont = 5):
     """Function that cuts up the genome into smaller pieces for parallel
     processing.
 
@@ -134,22 +134,35 @@ def getSplits(base, fasta, minlength = 10000000, mincont = 5):
     
     global totalPieces
     
+    # Announce that the function is currently active.
+    print('Getting splits of minimum length {}.'.format(minlength))
     # Initiate a dictionary for splitters
     pieces = []
     # Keep genome open only as long as necessary
     with open(fasta, "r") as genome:
         for ch in SeqIO.parse(genome, 'fasta'):
             splitters = splitter(base, str(ch.seq), minlength)
+            # Add to the global variable tracking the total number of pieces
             totalPieces += len(splitters)
             for ext in splitters:
+                # Create pieces such that each can serve as an input to
+                #  findSNRs()
                 pieces.append(
-                    (base, ch.id, str(ch.seq)[ext[0]:ext[1]], ext, mincont)
+                    (
+                        base,
+                        ch.id,
+                        str(ch.seq)[ext[0]:ext[1]],
+                        ext,
+                        db,
+                        temp,
+                        mincont
+                        )
                     )
     
     return pieces
 
     
-def findSNRs(base, refname, refseq, extent, db, temp = '.', minlen = 5):
+def findSNRs(base, refname, refseq, extent, db, temp = '.', mincont = 5):
     """Function to scan a given reference sequence (range) & find unique SNRs
     of given base type and length with given maximum number of mismatches
     allowed, such that the SNR contains mostly the primary bases and starts &
@@ -218,7 +231,7 @@ def findSNRs(base, refname, refseq, extent, db, temp = '.', minlen = 5):
                 lengthToSNRcounts[truLen] += 1
                 # If the size is sufficient, save the SNR into the dict by
                 #  its length & break
-                if truLen >= minlen:
+                if truLen >= mincont:
                     feat = {
                         ft.featuretype for ft in db_conn.region(
                             region = (refname, first, last),
