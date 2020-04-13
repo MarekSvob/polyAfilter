@@ -135,7 +135,7 @@ def getSplits(base, fasta, db, temp = '.', minlength = 10000000, mincont = 5):
     global totalPieces
     
     # Announce that the function is currently active.
-    print('Getting splits of minimum length {}.'.format(minlength))
+    print('Obtaining splits of minimum length {}.'.format(minlength))
     # Initiate a dictionary for splitters
     pieces = []
     # Keep genome open only as long as necessary
@@ -158,8 +158,25 @@ def getSplits(base, fasta, db, temp = '.', minlength = 10000000, mincont = 5):
                         mincont
                         )
                     )
+    print('Sorting pieces.')
+    # Sort the pieces by sequence length
+    pieces.sort(key = lambda x: len(x[2]))
+    # Now sort the pieces in an alternating manner:
+    # Initiate the new list and starting indices
+    optim_pieces = []
+    left = 0
+    right = len(pieces) - 1
+    # Only add more as long as the optim_pieces list is shorter than pieces
+    while len(optim_pieces) < len(pieces):
+        # Add the left one first & increase index
+        optim_pieces.append(pieces[left])
+        left += 1
+        if len(optim_pieces) < len(pieces):
+            # Then add the other one & increase index
+            optim_pieces.append(pieces[right])
+            right -= 1
     
-    return pieces
+    return optim_pieces
 
     
 def findSNRs(base, refname, refseq, extent, db, temp = '.', mincont = 5):
