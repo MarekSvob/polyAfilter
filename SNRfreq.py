@@ -49,17 +49,18 @@ class SNR:
         - Information wrt/ the reference genome.
         - Coordinates are 0-based.
     """
-    def __init__(self, base, seq, chrom, start, end, mism, strand, feat):
+    def __init__(self, base, seq, chrom, start, end, mism, strd, feats, genes):
         self.base = base                # str, 'A', 'T', 'C' or 'G'
         self.seq = seq                  # str, the sequence of the SNR
         self.chrom = chrom              # str, chromosome where SNR is found
         self.start = start              # int, start of the Site
         self.end = end                  # int, end of the Site
         self.mism = mism                # int, number of mismatches 
-        self.strand = strand            # bool: T (+) or F (-)
-        self.feat = feat                # set, GFFdb features for the
+        self.strd = strd                # bool: T (+) or F (-)
+        self.feats = feats              # set, GFFdb features for the
                                         #  respective strand, such as region,
                                         #  gene, exon, mRNA, CDS, etc.
+        self.genes = genes              # set, genes (or empty)
 
     def __str__(self):
         # Displays the base, length, number of mismatches, chromosome, start,
@@ -73,7 +74,7 @@ class SNR:
             )
 
 
-def splitter(base, refseq, minlength = 10000000):
+def splitter(base, refseq, minlength = 20000000):
     """Function to find splits in a given DNA sequence such that contigs of
     the base in question are not interrupted
     
@@ -111,7 +112,14 @@ def splitter(base, refseq, minlength = 10000000):
     
     return splits
 
-def getSplits(base, fasta, db, temp = '.', minlength = 10000000, mincont = 5):
+def getSplits(
+        base,
+        fasta,
+        db_out,
+        temp = '.',
+        minlength = 20000000,
+        mincont = 5
+        ):
     """Function that cuts up the genome into smaller pieces for parallel
     processing.
 
@@ -135,14 +143,14 @@ def getSplits(base, fasta, db, temp = '.', minlength = 10000000, mincont = 5):
     global totalPieces
     
     # Announce that the function is currently active.
-    print('Obtaining splits of minimum length {}.'.format(minlength))
+    print('Obtaining splits of minimum length {}...'.format(minlength))
     # Initiate a dictionary for splitters
     pieces = []
     # Keep genome open only as long as necessary
     with open(fasta, "r") as genome:
         for ch in SeqIO.parse(genome, 'fasta'):
             splitters = splitter(base, str(ch.seq), minlength)
-            # Add to the global variable tracking the total number of pieces
+            
             totalPieces += len(splitters)
             for ext in splitters:
                 # Create pieces such that each can serve as an input to
@@ -153,14 +161,17 @@ def getSplits(base, fasta, db, temp = '.', minlength = 10000000, mincont = 5):
                         ch.id,
                         str(ch.seq)[ext[0]:ext[1]],
                         ext,
-                        db,
+                        db_out,
                         temp,
                         mincont
                         )
                     )
-    print('Sorting pieces.')
-    # Sort the pieces by sequence length
-    pieces.sort(key = lambda x: len(x[2]))
+    # Edit the global variable to reflect the total number of pieces
+    totalPieces = len(pieces)
+    
+    print('Sorting {} splits in alternating order...'.format(totalPieces))
+    # Sort the pieces by sequence length, starting with the largest
+    pieces.sort(key = lambda x: len(x[2]), reverse = True)
     # Now sort the pieces in an alternating manner:
     # Initiate the new list and starting indices
     optim_pieces = []
@@ -179,7 +190,7 @@ def getSplits(base, fasta, db, temp = '.', minlength = 10000000, mincont = 5):
     return optim_pieces
 
     
-def findSNRs(base, refname, refseq, extent, db, temp = '.', mincont = 5):
+def findSNRs(base, refname, refseq, extent, db_out, temp = '.', mincont = 5):
     """Function to scan a given reference sequence (range) & find unique SNRs
     of given base type and length with given maximum number of mismatches
     allowed, such that the SNR contains mostly the primary bases and starts &
@@ -195,11 +206,11 @@ def findSNRs(base, refname, refseq, extent, db, temp = '.', mincont = 5):
         Reference sequence or its part to be searched.
     extent : (tuple), optional
         The range of the sequence to search.
-    db : (str)
+    db_out : (str)
         Address of the master copy of the database.
     temp : (str), optional
         Address of temporary space to create working copies of the database.
-    minlen : (int), optional
+    mincont : (int), optional
         The minimal length of the SNRs saved. (Note that all SNRs will be stil
         counted.) The default is 5.
 
@@ -223,7 +234,7 @@ def findSNRs(base, refname, refseq, extent, db, temp = '.', mincont = 5):
     
     # Make a temporary copy of the db file
     temp_f = tempfile.NamedTemporaryFile(suffix = '.db', dir = temp)
-    shutil.copy(db, temp_f.name)
+    shutil.copy(db_out, temp_f.name)
     
     # Open the db connection (for each process separately)
     db_conn = gffutils.FeatureDB(temp_f.name, keep_order = True)
@@ -249,12 +260,16 @@ def findSNRs(base, refname, refseq, extent, db, temp = '.', mincont = 5):
                 # If the size is sufficient, save the SNR into the dict by
                 #  its length & break
                 if truLen >= mincont:
-                    feat = {
-                        ft.featuretype for ft in db_conn.region(
+                    feats = set()
+                    genes = set()
+                    for ft in db_conn.region(
                             region = (refname, first, last),
                             strand = '+' if b == base else '-'
-                            )
-                        }
+                            ):
+                        feat = ft.featuretype
+                        feats.update(feat)
+                        if feat == 'gene':
+                            genes.update(set(ft.attributes['gene']))
                     lengthToSNRs[truLen].append(
                         SNR(
                             base,
@@ -264,7 +279,8 @@ def findSNRs(base, refname, refseq, extent, db, temp = '.', mincont = 5):
                             last + extent[0],
                             0,
                             b == base,
-                            feat
+                            feats,
+                            genes
                             )
                         )
                 break
@@ -276,82 +292,6 @@ def findSNRs(base, refname, refseq, extent, db, temp = '.', mincont = 5):
     
     return lengthToSNRs, lengthToSNRcounts
 
-def assignFeatures(lengthToSNRs, gff, db_out):
-    """Deprecated. Function that takes a dict generated by findSNRs and looks
-    up & saves the set of features for each SNR.
-    
-    Parameters
-    ----------
-    lengthToSNRs : (dict)
-        { length : [ SNRs ] }
-    gff : (str)
-        Location of the gff annotation file.
-    db_out : (str)
-        Location of the database file.
-
-    Returns
-    -------
-    None.
-    """
-    
-    # Connect to database; if it does not exist, create it from the gff first
-    if os.path.isfile(db_out):
-        db = gffutils.FeatureDB(db_out, keep_order = True)
-    else:
-        db = gffutils.create_db(
-            gff,
-            dbfn = db_out,
-            force = True,
-            merge_strategy = 'create_unique',
-            id_spec = ['ID', 'Name'],
-            verbose = True
-            )
-    
-    # Pre-calculate the length of the list
-    length = 0
-    for SNRs in lengthToSNRs.values(): length += len(SNRs)
-    length /= 100
-        
-    # Initiate current progress
-    current = 0; i = 0; t_start = time.time()
-    
-    for SNRs in lengthToSNRs.values():
-        for SNR in SNRs:
-            # Track progres through the SNRs
-            i += 1
-            # Calculate the current progress
-            progress = round(i/length, 3)
-            # If the new progress is different from the current
-            if progress != current:
-                # Announce progress through the list
-                diff = time.time() - t_start
-                exp = diff/progress*100
-                print('Processing SNRs: {}%'.format(progress))
-                print(
-                    'Current run time: {}h:{}m:{}s'.format(
-                        int(diff//(60*60)),
-                        int((diff%(60*60))//60),
-                        int(diff%60)
-                        )
-                    )
-                print(
-                    'Expected run time: {}h:{}m:{}s'.format(
-                        int(exp//(60*60)),
-                        int((exp%(60*60))//60),
-                        int(exp%60)
-                        )
-                    )
-                # Clear output but wait until the next one appears
-                clear_output(wait = True)
-                # Save the progress as current
-                current = progress
-            # Get the set of features from the database
-            SNR.feat = {
-                ft.featuretype for ft in db.region(
-                    region = (SNR.chrom, SNR.start, SNR.end),
-                    strand = '+' if SNR.strand else '-'
-                    )
-                }
 
 def howLongSince(t_start):
     """Function that prints out the amount of time elapsed since t_start.
@@ -460,7 +400,17 @@ def loadSNRs(genome, base):
     
     return lengthToSNRs
 
-def processPool(pieces, cpus = 20, maxtasks = None):
+def processPool(
+        base,
+        fasta,
+        gff,
+        db_out,
+        temp = '.',
+        minlength = 20000000,
+        mincont = 5,
+        cpus = 50,
+        maxtasks = None
+        ):
     """Parallel processing of genome scanning.
 
     Parameters
@@ -477,8 +427,34 @@ def processPool(pieces, cpus = 20, maxtasks = None):
     -------
     None.
     """
+    # Create a database from the gff if it does not exist yet
+    print('Checking database...')
+    if not os.path.isfile(db_out):
+        gffutils.create_db(
+            gff,
+            dbfn = db_out,
+            force = True,
+            merge_strategy = 'create_unique',
+            id_spec = ['ID', 'Name'],
+            verbose = True
+            )
+    # Create the list of pieces to be processed in parallel
+    pieces = getSplits(
+        base,
+        fasta,
+        db_out,
+        temp = temp,
+        minlength = minlength,
+        mincont = mincont
+        )
+    print('Processing the splits across {} parallel processes...'.format(cpus))
+    # Create a pool of workers with given # of processes & max tasks for each
+    #  before it is replaced
     pool = Pool(processes = cpus, maxtasksperchild = maxtasks)
+    # Queue up the processes
     for p in pieces:
         pool.apply_async(findSNRs, args = p, callback = collectResult)
+    # Close the pool
     pool.close()
+    # Join the processes
     pool.join()
