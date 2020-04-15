@@ -49,18 +49,17 @@ class SNR:
         - Information wrt/ the reference genome.
         - Coordinates are 0-based.
     """
-    def __init__(self, base, seq, chrom, start, end, mism, strd, feats, genes):
-        self.base = base                # str, 'A', 'T', 'C' or 'G'
-        self.seq = seq                  # str, the sequence of the SNR
-        self.chrom = chrom              # str, chromosome where SNR is found
-        self.start = start              # int, start of the Site
-        self.end = end                  # int, end of the Site
-        self.mism = mism                # int, number of mismatches 
-        self.strd = strd                # bool: T (+) or F (-)
-        self.feats = feats              # set, GFFdb features for the
-                                        #  respective strand, such as region,
-                                        #  gene, exon, mRNA, CDS, etc.
-        self.genes = genes              # set, genes (or empty)
+    def __init__(self, base, seq, rec, start, end, mism, strd, feats, genes):
+        self.base = base        # str, 'A', 'T', 'C' or 'G'
+        self.seq = seq          # str, the sequence of the SNR
+        self.rec = rec          # str, genomic record where SNR is found
+        self.start = start      # int, start of the Site
+        self.end = end          # int, end of the Site
+        self.mism = mism        # int, number of mismatches 
+        self.strd = strd        # bool: T (+) or F (-)
+        self.feats = feats      # set, GFFdb features for the respective strd,
+                                #  such as region, gene, exon, mRNA, CDS, etc.
+        self.genes = genes      # set, genes onto which SNR maps (or empty)
 
     def __str__(self):
         # Displays the base, length, number of mismatches, chromosome, start,
@@ -95,13 +94,15 @@ def splitter(base, refseq, minlength = 20000000):
     
     # Initiate the list and the first split
     splits = []; first = 0; last = minlength
-    
+    # Determine which bases to avoid using a global dictionary
     avoid = avoidSplits[base]
     
     # Generate valid splits until the last split exceeds length of the sequence
     while last < len(refseq):
+        # If the following base is to be avoided, move on
         if refseq[last] in avoid:
             last += 1
+        # Otherwise save the split & start a new one
         else:
             splits.append((first, last))
             first = last
@@ -112,7 +113,8 @@ def splitter(base, refseq, minlength = 20000000):
     
     return splits
 
-def getSplits(
+
+def getPieces(
         base,
         fasta,
         db_out,
@@ -149,18 +151,17 @@ def getSplits(
     # Keep genome open only as long as necessary
     with open(fasta, "r") as genome:
         for ch in SeqIO.parse(genome, 'fasta'):
-            splitters = splitter(base, str(ch.seq), minlength)
-            
-            totalPieces += len(splitters)
-            for ext in splitters:
+            # Obtain the splits for this record
+            splits = splitter(base, str(ch.seq), minlength)
+            for split in splits:
                 # Create pieces such that each can serve as an input to
-                #  findSNRs()
+                #  findSNRs() & add them to the list of pieces
                 pieces.append(
                     (
                         base,
                         ch.id,
-                        str(ch.seq)[ext[0]:ext[1]],
-                        ext,
+                        str(ch.seq)[split[0]:split[1]],
+                        split,
                         db_out,
                         temp,
                         mincont
@@ -169,7 +170,7 @@ def getSplits(
     # Edit the global variable to reflect the total number of pieces
     totalPieces = len(pieces)
     
-    print('Sorting {} splits in alternating order...'.format(totalPieces))
+    print('Sorting {} pieces by length...'.format(totalPieces))
     # Sort the pieces by sequence length, starting with the largest
     pieces.sort(key = lambda x: len(x[2]), reverse = True)
     # Now sort the pieces in an alternating manner:
@@ -190,7 +191,7 @@ def getSplits(
     return optim_pieces
 
     
-def findSNRs(base, refname, refseq, extent, db_out, temp = '.', mincont = 5):
+def findSNRs(base, refname, refseq, split, db_out, temp = '.', mincont = 5):
     """Function to scan a given reference sequence (range) & find unique SNRs
     of given base type and length with given maximum number of mismatches
     allowed, such that the SNR contains mostly the primary bases and starts &
@@ -201,11 +202,11 @@ def findSNRs(base, refname, refseq, extent, db_out, temp = '.', mincont = 5):
     base : (str)
         DNA base constituting SNRs to be searched for: "A", "T", "C", "G", "N"
     refname : (str)
-        The name of the reference sequence to be searched.
+        The name of the reference sequence searched.
     refseq : (str)
         Reference sequence or its part to be searched.
-    extent : (tuple), optional
-        The range of the sequence to search.
+    split : (tuple), optional
+        The range of the refseq that this specific split corresponds to.
     db_out : (str)
         Address of the master copy of the database.
     temp : (str), optional
@@ -263,20 +264,20 @@ def findSNRs(base, refname, refseq, extent, db_out, temp = '.', mincont = 5):
                     feats = set()
                     genes = set()
                     for ft in db_conn.region(
-                            region = (refname, first, last),
+                            region = (refname, split[0]+first, split[0]+last),
                             strand = '+' if b == base else '-'
                             ):
                         feat = ft.featuretype
                         feats.update(feat)
-                        if feat == 'gene':
+                        if feat in ('mRNA', 'transcript'):
                             genes.update(set(ft.attributes['gene']))
                     lengthToSNRs[truLen].append(
                         SNR(
                             base,
                             refseq[first:last],
                             refname,
-                            first + extent[0],
-                            last + extent[0],
+                            split[0]+first,
+                            split[0]+last,
                             0,
                             b == base,
                             feats,
@@ -337,10 +338,10 @@ def collectResult(result):
     for length, count in countDict.items(): resultSNRcounts[length] += count
     # Add to the global variable
     processed += 1
-    # Announce progress
-    print('Processed split: {}/{}'.format(processed, totalPieces))
     # Clear output but wait until the next one appears
     clear_output(wait = True)
+    # Announce progress
+    print('Processed split: {}/{}'.format(processed, totalPieces))
     
 def saveSNRcsv(loc, base, lengthToSNRcounts):
     """Saving the SNR count dictionary as a csv file.
@@ -439,7 +440,7 @@ def processPool(
             verbose = True
             )
     # Create the list of pieces to be processed in parallel
-    pieces = getSplits(
+    pieces = getPieces(
         base,
         fasta,
         db_out,
@@ -447,7 +448,7 @@ def processPool(
         minlength = minlength,
         mincont = mincont
         )
-    print('Processing the splits across {} parallel processes...'.format(cpus))
+    print('Looking for SNRs in the splits across {} parallel processes...'.format(cpus))
     # Create a pool of workers with given # of processes & max tasks for each
     #  before it is replaced
     pool = Pool(processes = cpus, maxtasksperchild = maxtasks)
