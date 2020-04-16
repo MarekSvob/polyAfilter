@@ -273,9 +273,9 @@ def findSNRs(base, refname, refseq, split, db_out, temp = '.', mincont = 5):
                             strand = '+' if b == base else '-'
                             ):
                         feat = ft.featuretype
-                        feats.update(feat)
-                        if feat in ('mRNA', 'transcript'):
-                            genes.update(set(ft.attributes['gene']))
+                        feats.update({feat})
+                        if feat == 'transcript':
+                            genes.update(set(ft.attributes['gene_name']))
                     lengthToSNRs[truLen].append(
                         SNR(
                             base,
