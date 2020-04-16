@@ -16,6 +16,8 @@ import shutil
 from Bio import SeqIO
 from IPython.display import clear_output
 from multiprocessing import Pool
+from random import uniform
+from time import sleep
 
 
 # Global variables to be initiated
@@ -64,10 +66,10 @@ class SNR:
     def __str__(self):
         # Displays the base, length, number of mismatches, chromosome, start,
         #  end wrt/ reference genome
-        return 'poly({}): {} @ ch{}:{}-{}'.format(
+        return 'poly({}): {} @ {}:{}-{}'.format(
             self.base,
             self.seq,
-            self.chrom,
+            self.rec,
             self.start,
             self.end
             )
@@ -232,6 +234,9 @@ def findSNRs(base, refname, refseq, split, db_out, temp = '.', mincont = 5):
     
     # Initialize trackers
     first = 0; truEnd = len(refseq)
+    
+    # Wait a random amount of time between 0-10 sec
+    sleep(uniform(0,10))
     
     # Make a temporary copy of the db file
     temp_f = tempfile.NamedTemporaryFile(suffix = '.db', dir = temp)
@@ -431,6 +436,7 @@ def processPool(
     # Create a database from the gff if it does not exist yet
     print('Checking database...')
     if not os.path.isfile(db_out):
+        print('None has been created - creating a database...')
         gffutils.create_db(
             gff,
             dbfn = db_out,
@@ -439,6 +445,7 @@ def processPool(
             id_spec = ['ID', 'Name'],
             verbose = True
             )
+    print('Database is ready.')
     # Create the list of pieces to be processed in parallel
     pieces = getPieces(
         base,
