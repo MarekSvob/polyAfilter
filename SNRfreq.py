@@ -132,12 +132,8 @@ def getPieces(base, fasta, cpus, cFR):
     # Initiate the range of piece sizes as a reusable tuple (which is a range
     #  of pre-set franctions of the genome divided by the # of cpus) & announce
     ran = (genomeLength//(cFR[0]*cpus), genomeLength//(cFR[1]*cpus))
-    print('The total genome length is {} bp; \
-          each piece will contain between {} and {} bases...'.format(
-              genomeLength,
-              *ran
-              )
-        )
+    print('The total genome length is {} bp'.format(genomeLength))
+    print('Each piece will contain between {} and {} bases...'.format(*ran))
     # Initiate the parameters for the first piece & the master list itself
     unit = randint(*ran)    
     piece = []
@@ -263,20 +259,25 @@ def findSNRs(base, piece, db_out, temp, mincont):
                             # Save the type of the feature & add to the set
                             feat = ft.featuretype
                             feats.update({feat})
-                            # If this is a transcript feature, make sure that
-                            #  each (should always be one, but it is a list)
-                            #  gene it represents is in the dict
-                            if feat == 'transcript':
-                                for g in ft.attributes['gene_name']:
-                                    # The gene is either added to the dict
-                                    #  with 'False' or if it already exists,
-                                    #  its bool is not over-written
-                                    genes[g]
-                            # If this is an exon feature, make sure that the
-                            #  gene[s] it represents is in the dict with 'True'
+                            # If this is a transcript, make sure that the gene
+                            #  (a list of 1) it represents is in the dict
+                            if feat in ('transcript', 'mRNA'):
+                                # If gene_id is N/A, get 'gene' (DM genome)
+                                [g] = ft.attributes['gene_id'] \
+                                    if 'gene_id' in ft.attributes.keys() \
+                                        else ft.attributes['gene']
+                                genes[g]
+                                # The gene is either added to the dict with
+                                #  'False' or if it already exists, its bool
+                                #  is not over-written
+                            # If this is an exon, make sure that the gene it
+                            #  represents is in the dict with val 'True'
                             elif feat == 'exon':
-                                for g in ft.attributes['gene_name']:
-                                    genes[g] = True
+                                # If gene_id is N/A, get 'gene' (DM genome)
+                                [g] = ft.attributes['gene_id'] \
+                                    if 'gene_id' in ft.attributes.keys() \
+                                        else ft.attributes['gene']
+                                genes[g] = True
                         # Now add the new SNR to the appropriate dict
                         lengthToSNRs[length].append(
                             SNR(
@@ -351,7 +352,7 @@ def collectResult(result):
     # Announce progress
     print('Processed split: {}/{}'.format(processed, totalPieces))
     
-def saveSNRcsv(loc, base, lengthToSNRcounts):
+def saveSNRcsv(loc, lengthToSNRcounts):
     """Saving the SNR count dictionary as a csv file.
 
     Parameters
@@ -369,9 +370,6 @@ def saveSNRcsv(loc, base, lengthToSNRcounts):
     """
 
     with open(loc, 'w') as f:
-        # Write the header
-        line = 'poly{}/{} Length,Count\n'.format(base, compDict[base])
-        f.write(line)
         for key in sorted(lengthToSNRcounts.keys()):
             f.write('{},{}\n'.format(key, lengthToSNRcounts[key]))
             
@@ -392,6 +390,30 @@ def saveSNRpkl(loc, lengthToSNRs):
 
     with open(loc, 'wb') as f:
         pickle.dump(lengthToSNRs, f)
+        
+def loadSNRcsv(loc):
+    """Loading the SNR count dictionary as a csv file for further processing.
+
+    Parameters
+    ----------
+    loc : (str)
+        Location of where the csv had been saved.
+
+    Returns
+    -------
+    lengthToSNRcounts : (dict)
+        { length : SNRcount }
+    """
+    
+    lengthToSNRcounts = {}
+    
+    with open(loc, 'r') as f:
+        for line in f:
+            k,v = line.rstrip('\n').split(',')
+            lengthToSNRcounts[int(k)] = (v)
+            
+    return lengthToSNRcounts
+    
 
 def loadSNRpkl(loc):
     """Loading the SNR dictionary as a pkl file for further processing.
