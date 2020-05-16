@@ -372,6 +372,8 @@ def saveSNRcsv(loc, lengthToSNRcounts):
     with open(loc, 'w') as f:
         for key in sorted(lengthToSNRcounts.keys()):
             f.write('{},{}\n'.format(key, lengthToSNRcounts[key]))
+    
+    print('SNR counts saved to {}'.format(loc))
             
 def saveSNRpkl(loc, lengthToSNRs):
     """Saving the SNR dictionary as a pkl file for later use.
@@ -390,6 +392,8 @@ def saveSNRpkl(loc, lengthToSNRs):
 
     with open(loc, 'wb') as f:
         pickle.dump(lengthToSNRs, f)
+        
+    print('SNRs saved to {}'.format(loc))
         
 def loadSNRcsv(loc):
     """Loading the SNR count dictionary as a csv file for further processing.
@@ -411,6 +415,7 @@ def loadSNRcsv(loc):
         for line in f:
             k,v = line.rstrip('\n').split(',')
             lengthToSNRcounts[int(k)] = (v)
+    print('SNR counts loaded from {}'.format(loc))
             
     return lengthToSNRcounts
     
@@ -431,6 +436,7 @@ def loadSNRpkl(loc):
 
     with open(loc, 'rb') as f:
         lengthToSNRs = pickle.load(f)
+    print('SNRs loaded from {}'.format(loc))
     
     return lengthToSNRs
 
