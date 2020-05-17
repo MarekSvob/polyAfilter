@@ -64,7 +64,7 @@ class SNR:
 
     def __str__(self):
         # Displays the base, number of mismatches, and location
-        return 'poly({})[-{}] @ {}:{}-{}'.format(
+        return 'poly({})[-{}] @ {}:{:,}-{:,}'.format(
             self.base,
             self.mism,
             self.record,
@@ -132,8 +132,10 @@ def getPieces(base, fasta, cpus, cFR):
     # Initiate the range of piece sizes as a reusable tuple (which is a range
     #  of pre-set franctions of the genome divided by the # of cpus) & announce
     ran = (genomeLength//(cFR[0]*cpus), genomeLength//(cFR[1]*cpus))
-    print('The total genome length is {} bp'.format(genomeLength))
-    print('Each piece will contain between {} and {} bases...'.format(*ran))
+    print('The total genome length is {:,} bp'.format(genomeLength))
+    print(
+        'Each piece will contain between {:,} and {:,} bases...'.format(*ran)
+        )
     # Initiate the parameters for the first piece & the master list itself
     unit = randint(*ran)    
     piece = []
@@ -170,7 +172,9 @@ def getPieces(base, fasta, cpus, cFR):
     # Save the total number of pieces to the respective global variable
     totalPieces = len(allPieces)
     # Sort the pieces in place by their total length, largest to smallest
-    print('Sorting {} pieces by the total number of bp...'.format(totalPieces))
+    print(
+        'Sorting {:,} pieces by the total number of bp...'.format(totalPieces)
+        )
     allPieces.sort(key = lambda x: sum([len(i[2]) for i in x]), reverse = True)
     
     return allPieces
@@ -350,7 +354,7 @@ def collectResult(result):
     # Count this piece as processed
     processed += 1
     # Announce progress
-    print('Processed split: {}/{}'.format(processed, totalPieces))
+    print('Processed split: {:,}/{:,}'.format(processed, totalPieces))
     
 def saveSNRcsv(loc, lengthToSNRcounts):
     """Saving the SNR count dictionary as a csv file.
