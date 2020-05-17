@@ -196,7 +196,9 @@ def SNRcountOEplot(
         dfs,
         names,
         fontSize = 20,
-        figSize = (15, 15)
+        figSize = (15, 15),
+        xlim = None,
+        ylim = None
         ):
     """Plotter of the SNR dfs provided,
 
@@ -210,6 +212,10 @@ def SNRcountOEplot(
         Size of the plot's font. The default is 20.
     figSize : (tuple), optional
         (width, height) size in inches. The default is (15,15).
+    xlim : (tuple)
+        (left, right) limits of the x-axis. The defaults is None.
+    ylim : (tuple)
+        (bottom, top) limits of the y-axis. The defaults is None.
 
     Returns
     -------
@@ -228,9 +234,11 @@ def SNRcountOEplot(
             linestyle = '-',
             label = names[i]
             )
-    # Set the labels
+    # Set the axes
     plt.xlabel('poly(A) length')
     plt.ylabel('Log10 O/E')
+    plt.xlim(xlim)
+    plt.ylim(ylim)
     # Add a gray line @0 (where O/E = 1)
     plt.axhline(y = 0, color = 'gray', linestyle = '--')
     # Place the legend
