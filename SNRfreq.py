@@ -375,15 +375,15 @@ def saveSNRcsv(loc, lengthToSNRcounts):
     
     print('SNR counts saved to {}'.format(loc))
             
-def saveSNRpkl(loc, lengthToSNRs):
-    """Saving the SNR dictionary as a pkl file for later use.
+def savePKL(loc, var):
+    """Saving any variable as a pkl file for later use.
 
     Parameters
     ----------
     loc : (str)
         Location of where the pkl should be saved.
-    lengthToSNRs : (dict)
-        { length : [ SNR ] }
+    var : (any)
+        Any file
 
     Returns
     -------
@@ -391,9 +391,9 @@ def saveSNRpkl(loc, lengthToSNRs):
     """
 
     with open(loc, 'wb') as f:
-        pickle.dump(lengthToSNRs, f)
+        pickle.dump(var, f)
         
-    print('SNRs saved to {}'.format(loc))
+    print('File saved to {}'.format(loc))
         
 def loadSNRcsv(loc):
     """Loading the SNR count dictionary as a csv file for further processing.
@@ -414,14 +414,15 @@ def loadSNRcsv(loc):
     with open(loc, 'r') as f:
         for line in f:
             k,v = line.rstrip('\n').split(',')
-            lengthToSNRcounts[int(k)] = (v)
+            lengthToSNRcounts[int(k)] = int(v)
     print('SNR counts loaded from {}'.format(loc))
             
     return lengthToSNRcounts
     
 
-def loadSNRpkl(loc):
-    """Loading the SNR dictionary as a pkl file for further processing.
+def loadPKL(loc):
+    """Loading any variable from a pkl file for further processing.
+    Note: The approprite class needs to have been loaded into the environment.
 
     Parameters
     ----------
@@ -430,15 +431,15 @@ def loadSNRpkl(loc):
 
     Returns
     -------
-    lengthToSNRs : (dict)
-        { length : [ SNR ] }
+    var : (any)
+        Any class variable
     """
 
     with open(loc, 'rb') as f:
-        lengthToSNRs = pickle.load(f)
-    print('SNRs loaded from {}'.format(loc))
+        var = pickle.load(f)
+    print('File loaded from {}'.format(loc))
     
-    return lengthToSNRs
+    return var
 
 def processPoolSNRs(
         base,
