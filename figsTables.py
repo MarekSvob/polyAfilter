@@ -122,7 +122,8 @@ def countsCheck(base, lengthToSNRcounts, bases):
         print(
             'The total number of {}/{} bases ({:,}) checks out!'.format(
                 base,
-                compDict[base]
+                compDict[base],
+                SNRbases
                 )
             )
     else:
