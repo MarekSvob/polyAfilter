@@ -184,6 +184,7 @@ def SNRcountTable(base, lengthToSNRcounts, bases, show = True):
     df.columns = ('SNR Length','Observed', 'O/E')
     df['Observed'] = df['Observed'].astype(int)
     df['SNR Length'] = df['SNR Length'].astype(int)
+    df.sort_values(by = ['SNR Length'])
     # Optionally, show the dataframe as a styled table
     if show:
         styler = df.style.format('{:.2E}', subset = ['O/E']).hide_index()
