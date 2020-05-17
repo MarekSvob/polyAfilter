@@ -63,7 +63,7 @@ def countsCheck(base, lengthToSNRcounts, bases):
     scanned = bases[capsDict[base][0]] \
         + bases[capsDict[base][1]] \
             + bases[capsDict[compDict[base]][0]] \
-                + bases[capsDict[compDict[base]][0]]
+                + bases[capsDict[compDict[base]][1]]
     
     if SNRbases == scanned:
         print(
