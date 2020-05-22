@@ -257,9 +257,12 @@ def findSNRs(base, piece, db_out, temp, mincont):
                         genes = collections.defaultdict(bool)
                         # For each feature from the db spanned by the SNR
                         for ft in db_conn.region(
-                                region = (s[0], s[1] + first, s[1] + last),
+                                region = (s[0], s[1] + first, s[1] + last + 1),
                                 strand = '+' if b == base else '-'
                                 ):
+                            # Note that the region() query is 1-based (a,b)
+                            #  open interval, as documented here:
+                            #  https://github.com/daler/gffutils/issues/129
                             # Save the type of the feature & add to the set
                             feat = ft.featuretype
                             feats.update({feat})
