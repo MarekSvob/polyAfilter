@@ -602,7 +602,7 @@ def normalizeLabels(
     # Note that GFF features are 1-based, closed intervals
     if os.path.isfile(out_feats):
         flatFeats = loadPKL(out_feats)
-        for k,feats in flatFeats:
+        for k,feats in flatFeats.items():
             # 1-based, closed intervals [start, end]
             regions[k[:-1]] += sum([feat[2] - feat[1] + 1 for feat in feats])
     else:
