@@ -162,9 +162,9 @@ def getPieces(base, fasta, cpus, cFR):
     # Initiate the range of piece sizes as a reusable tuple (which is a range
     #  of pre-set franctions of the genome divided by the # of cpus) & announce
     ran = (genomeLength//(cFR[0]*cpus), genomeLength//(cFR[1]*cpus))
-    print('The total genome length is {:,} bp'.format(genomeLength))
+    print('The total genome length is {:,} bp.'.format(genomeLength))
     print(
-        'Each piece will contain between {:,} and {:,} bases...'.format(*ran)
+        'Each piece will contain between {:,} and {:,} bp...'.format(*ran)
         )
     # Initiate the parameters for the first piece & the master list itself
     unit = randint(*ran)    
@@ -852,7 +852,7 @@ def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
         polyLen.append(int(k))
         obs.append(int(v))
         oe.append(
-            (int(v)/int(sumKnownBases(bases))) \
+            (int(v)/int(sumKnownBases)) \
                 / ( (1-pBase) * pBase**int(k) * (1-pBase) \
                    + (1-pComp) * pComp**int(k) * (1-pComp) )
             )
