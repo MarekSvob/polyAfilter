@@ -191,7 +191,7 @@ def SNRlabelProps(lengthToSNRs, exclusivePairs = pairs, other = 'Exon'):
     for key, vals in lengthToSNRs.items():
         for SNR in vals:
             for i in range(len(exclusivePairs)):
-                if exclusivePairs[i] not in SNR.feats:
+                if exclusivePairs[i][0] not in SNR.feats:
                     index = i
                     break
             else:
