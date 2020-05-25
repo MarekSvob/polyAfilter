@@ -862,6 +862,6 @@ def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
     df.columns = ('SNR Length','Observed', 'O/E')
     df['Observed'] = df['Observed'].astype(int)
     df['SNR Length'] = df['SNR Length'].astype(int)
-    df.sort_values(by = ['SNR Length'])
+    df.sort_values(by = ['SNR Length'], inplace = True)
     
     return df
