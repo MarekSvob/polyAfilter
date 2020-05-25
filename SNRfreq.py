@@ -611,7 +611,7 @@ def normalizeLabels(
         
         # Initiate the variables needed
         strands = ('+', '-')
-        featsOfInterest = [p[0] for p in pairs]
+        featsOfInterest = [p[0] for p in exclusivePairs]
         flatFeats = {}
         
         for featType in featsOfInterest:
@@ -681,16 +681,17 @@ def normalizeLabels(
 
     # The first label in exclusivePairs depends on the length of the genome
     labelProps = np.array(
-        [(genomeLength*2 - regions[pairs[0][0]]) / (genomeLength*2)]
+        [(genomeLength*2 - regions[exclusivePairs[0][0]]) / (genomeLength*2)]
         )
     # Add values for the subsequent labels in exclusivePairs
-    for i in range(1,len(pairs)):
+    for i in range(1,len(exclusivePairs)):
         labelProps = np.concatenate((labelProps, np.array([
-            (regions[pairs[i-1][0]] - regions[pairs[i][0]]) / (genomeLength*2)
+            (regions[exclusivePairs[i-1][0]] - regions[exclusivePairs[i][0]]) \
+                / (genomeLength*2)
             ])))
     # Add the last one, independent of other labels
     labelProps = np.concatenate(
-        (labelProps, np.array([regions[pairs[-1][0]] / (genomeLength*2)]))
+        (labelProps, np.array([regions[exclusivePairs[-1][0]] / (genomeLength*2)]))
         )
     
     # Normalize the df using these proportions
