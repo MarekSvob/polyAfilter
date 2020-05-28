@@ -61,8 +61,8 @@ def SNRcountOEplot(
     """
     
     # Set the figure parameters
-    plt.rcParams.update({'font.size': 20})
-    plt.figure(figsize = (15,15))
+    plt.rcParams.update({'font.size': fontSize})
+    plt.figure(figsize = figSize)
     # Set the properties of each series
     for i in range(len(dfs)):
         plt.plot(

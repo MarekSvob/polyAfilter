@@ -59,26 +59,39 @@ class SNR:
         - Coordinates are 0-based.
     """    
     
-    def __init__(self, base, record, start, end, mism, strand, feats, genes):
+    def __init__(
+            self,
+            base,
+            record,
+            start,
+            end,
+            mism,
+            strand,
+            cFeats,
+            cGenes,
+            dFeats,
+            dGenes
+            ):
         self.base = base        # str, 'A', 'T', 'C' or 'G'
         self.record = record    # str, record (chromosome) where SNR is found
         self.start = start      # int, start of the SNR locus
         self.end = end          # int, end of the SNR locus
         self.mism = mism        # int, number of mismatches 
         self.strand = strand    # bool: T (+) or F (-)
-        self.feats = feats      # set, GFFdb features on the respective strand,
-                                #  such as region, gene, exon, transcript, etc.
-        self.genes = genes      # dict, { gene : bool } genes (transcripts)
-                                #  onto which SNR maps & whether it is an exon
+        self.concFeats = cFeats # set, GFFdb features on the respective strand,
+        self.discFeats = dFeats #  such as region, gene, exon, transcript, etc.
+        self.concGenes = cGenes # dict, { gene : bool } genes (transcripts)
+        self.discGenes = dGenes #  onto which SNR maps on the respective strand
+                                #  & whether it is in an exon wrt/ this gene
 
     def __str__(self):
         # Displays the base, number of mismatches, and location
         return 'poly({})[-{}] @ {}:{:,}-{:,}'.format(
-            self.base,
+            self.base if self.strand else compDict[self.base],
             self.mism,
             self.record,
             self.start,
-            self.end,
+            self.end
             )
 
 
@@ -100,7 +113,7 @@ def measureGenome(fasta):
     genomeLength = 0
     # Keep genome open only as long as necessary, while going over each record
     #  to measure the total genome length.
-    with open(fasta, "r") as genome:
+    with open(fasta, 'r') as genome:
         for ch in SeqIO.parse(genome, 'fasta'):
             genomeLength += len(ch.seq)
             
@@ -282,40 +295,48 @@ def findSNRs(base, piece, db_out, temp, mincont):
                     # If the size is sufficient, save the SNR into the dict by
                     #  its length with its attributes
                     if length >= mincont:
-                        # Initialize the set of features & dict of genes
-                        feats = set()
-                        genes = collections.defaultdict(bool)
-                        # For each feature from the db spanned by the SNR
-                        for ft in db_conn.region(
+                        # Set the order of strands to look up features, always
+                        #  first concordant with the SNR, then discordant
+                        strds = ('+', '-') if b == base else ('-', '+')
+                        # Initialize the list [cFeats, cGenes, dFeats, dGenes]
+                        elems = []
+                        for strd in strds:
+                            # Initialize the set of features & genes
+                            feats = set()
+                            genes = collections.defaultdict(bool)
+                            # For each feature from the db spanned by the SNR
+                            for ft in db_conn.region(
                                 region = (s[0], s[1] + first, s[1] + last + 1),
                                 strand = '+' if b == base else '-'
                                 ):
-                        # Note that the region() query is 1-based (a,b) open
-                        #  interval, as documented here:
-                        #  https://github.com/daler/gffutils/issues/129
-                            # Save the type of the feature & add to the set
-                            feat = ft.featuretype
-                            feats.update({feat})
-                            # If this is a transcript, make sure that the gene
-                            #  (a list of 1) it represents is in the dict
-                            if feat in ('transcript', 'mRNA'):
-                                # If gene_id is N/A, get 'gene' (DM genome)
-                                [g] = ft.attributes['gene_id'] \
-                                    if 'gene_id' in ft.attributes.keys() \
-                                        else ft.attributes['gene']
-                                genes[g]
-                                # The gene is either added to the dict with
-                                #  'False' or if it already exists, its bool
-                                #  is not over-written
-                            # If this is an exon, make sure that the gene it
-                            #  represents is in the dict with val 'True'
-                            elif feat == 'exon':
-                                # If gene_id is N/A, get 'gene' (DM genome)
-                                [g] = ft.attributes['gene_id'] \
-                                    if 'gene_id' in ft.attributes.keys() \
-                                        else ft.attributes['gene']
-                                genes[g] = True
-                        # Now add the new SNR to the appropriate dict
+                            # Note that the region() query is a 1-based (a,b)
+                            #  open interval, as documented here:
+                            #  https://github.com/daler/gffutils/issues/129
+                                # Save the feature type & add to the set
+                                feat = ft.featuretype
+                                feats.update({feat})
+                                # If this is a transcript, make sure that the gene
+                                #  (a list of 1) it represents is in the dict
+                                if feat in ('transcript', 'mRNA'):
+                                    # If gene_id is N/A, get 'gene' (DM genome)
+                                    [g] = ft.attributes['gene_id'] \
+                                        if 'gene_id' in ft.attributes.keys() \
+                                            else ft.attributes['gene']
+                                    genes[g]
+                                    # The gene is either added to the dict w/
+                                    #  'False' or if it already exists, its
+                                    #  bool is not over-written
+                                # If this is an exon, make sure that the gene
+                                #  it represents is in the dict with val 'True'
+                                elif feat == 'exon':
+                                    # If gene_id is N/A, get 'gene' (DM genome)
+                                    [g] = ft.attributes['gene_id'] \
+                                        if 'gene_id' in ft.attributes.keys() \
+                                            else ft.attributes['gene']
+                                    genes[g] = True
+                            elems.append(feats)
+                            elems.append(genes)
+                        # Now add the new SNR to the dict (keeping itr 0-based)
                         lengthToSNRs[length].append(
                             SNR(
                                 base,
@@ -324,8 +345,7 @@ def findSNRs(base, piece, db_out, temp, mincont):
                                 s[1] + last,
                                 0,
                                 b == base,
-                                feats,
-                                genes
+                                *elems
                                 )
                             )
                     # For each SNR, break the for-loop so that if 'base' was
@@ -591,7 +611,6 @@ def normalizeLabels(
     -------
     df_norm : (dataframe)
         Normalized dataframe
-
     """
     
     global genomeLength
@@ -666,7 +685,7 @@ def normalizeLabels(
                     # 1-based, closed intervals [start, end]
                     regions[featType] += (feat[2] - feat[1] + 1)
                 # Save the feats in the master list to be saved
-                flatFeats['{}{}'.format(featType, strd)] = featList
+                flatFeats['{}{}'.format(featType, strd)] = sorted(featList)
         # Save the flattened feats to speed up the process in the future
         savePKL(out_feats, flatFeats)
     
