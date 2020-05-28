@@ -13,8 +13,7 @@ import pandas as pd
 import numpy as np
 from Bio import SeqIO
 
-from SNRdetection import loadPKL, savePKL, measureGenome
-import univars as uv
+from SNRdetection import loadPKL, savePKL, measureGenome, compDict, capsDict
 
 # Default exclusivePairs
 pairs = [
@@ -100,16 +99,16 @@ def countsCheck(base, lengthToSNRcounts, out_bases, fasta = None):
         savePKL(out_bases, bases)
     # Get the number of bases (including complementary and non-caps) from the
     #  genome scan.
-    scanned = bases[uv.capsDict[base][0]] \
-        + bases[uv.capsDict[base][1]] \
-            + bases[uv.capsDict[uv.compDict[base]][0]] \
-                + bases[uv.capsDict[uv.compDict[base]][1]]
+    scanned = bases[capsDict[base][0]] \
+        + bases[capsDict[base][1]] \
+            + bases[capsDict[compDict[base]][0]] \
+                + bases[capsDict[compDict[base]][1]]
     
     if SNRbases == scanned:
         print(
             'The total number of {}/{} bases ({:,}) checks out!'.format(
                 base,
-                uv.compDict[base],
+                compDict[base],
                 SNRbases
                 )
             )
@@ -117,7 +116,7 @@ def countsCheck(base, lengthToSNRcounts, out_bases, fasta = None):
         print(
             '{}/{} bases in SNRs: {:,}; from genome scanning {:,}'.format(
                 base,
-                uv.compDict[base],
+                compDict[base],
                 SNRbases,
                 scanned
                 )
@@ -159,10 +158,10 @@ def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
         + bases['C'] + bases['c'] + bases['G'] + bases['g']
     
     # Calculate the frequency of the base in question and its complement
-    pBase = (bases[uv.capsDict[base][0]] \
-             + bases[uv.capsDict[base][1]]) / sumKnownBases
-    pComp = (bases[uv.capsDict[uv.compDict[base]][0]] \
-             + bases[uv.capsDict[uv.compDict[base]][1]]) / sumKnownBases
+    pBase = (bases[capsDict[base][0]] \
+             + bases[capsDict[base][1]]) / sumKnownBases
+    pComp = (bases[capsDict[compDict[base]][0]] \
+             + bases[capsDict[compDict[base]][1]]) / sumKnownBases
     
     # Obtain the table data as a list of 3 respective lists: SNRlength,
     #  Observed absolute # of SNRs, and O/E ratio

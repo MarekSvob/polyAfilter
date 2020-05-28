@@ -17,8 +17,6 @@ from Bio import SeqIO
 from multiprocessing import Pool
 from random import randint
 
-import univars as uv
-
 
 # Global result, tracking, and help variables to be initiated
 resultSNRs = collections.defaultdict(list)
@@ -33,6 +31,18 @@ avoidSplits = {
     'T':('a', 'A', 't', 'T'),
     'C':('c', 'C', 'g', 'G'),
     'G':('c', 'C', 'g', 'G'),
+    }
+
+# Dict of complementary bases
+compDict = {'A':'T', 'T':'A', 'C':'G', 'G':'C', 'N':'N'}
+
+# Handling of non-caps in the sequence
+capsDict = {
+    'A':('a', 'A'),
+    'T':('t', 'T'),
+    'C':('c', 'C'),
+    'G':('g', 'G'),
+    'N':'N'
     }
 
 
@@ -72,7 +82,7 @@ class SNR:
     def __str__(self):
         # Displays the base, number of mismatches, and location
         return 'poly({})[-{}] @ {}:{:,}-{:,}'.format(
-            self.base if self.strand else uv.compDict[self.base],
+            self.base if self.strand else compDict[self.base],
             self.mism,
             self.record,
             self.start,
@@ -245,7 +255,7 @@ def findSNRs(base, piece, db_out, temp, mincont):
     """
 
     # Define the complement base to be sought
-    cBase = uv.compDict[base]
+    cBase = compDict[base]
     
     # Initiate the dicts for SNRs and their counts
     lengthToSNRs = collections.defaultdict(list)
@@ -274,7 +284,7 @@ def findSNRs(base, piece, db_out, temp, mincont):
             for b in (base, cBase):
                 # If found, keep testing the subsequent bases for this base in
                 #  either caps or non-caps
-                eitherCaps = uv.capsDict[b]
+                eitherCaps = capsDict[b]
                 if refseq[first] in eitherCaps:
                     # As long as last hasn't reached the end of the record and
                     #  the same base is found on the subsequent position,
