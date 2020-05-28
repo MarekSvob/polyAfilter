@@ -307,7 +307,7 @@ def findSNRs(base, piece, db_out, temp, mincont):
                             # For each feature from the db spanned by the SNR
                             for ft in db_conn.region(
                                 region = (s[0], s[1] + first, s[1] + last + 1),
-                                strand = '+' if b == base else '-'
+                                strand = strd
                                 ):
                             # Note that the region() query is a 1-based (a,b)
                             #  open interval, as documented here:
