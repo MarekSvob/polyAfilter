@@ -19,36 +19,7 @@ from Bio import SeqIO
 from multiprocessing import Pool
 from random import randint
 
-
-# Global result, tracking, and help variables to be initiated
-resultSNRs = collections.defaultdict(list)
-resultSNRcounts = collections.defaultdict(int)
-totalPieces = 0
-processed = 0
-genomeLength = 0
-# Dict of complementary bases
-compDict = {'A':'T', 'T':'A', 'C':'G', 'G':'C', 'N':'N'}
-# Handling of non-caps in the sequence
-capsDict = {
-    'A':('a', 'A'),
-    'T':('t', 'T'),
-    'C':('c', 'C'),
-    'G':('g', 'G'),
-    'N':'N'
-    }
-# A dictionary of letters to avoid for splitting, given the base sought
-avoidSplits = {
-    'A':('a', 'A', 't', 'T'),
-    'T':('a', 'A', 't', 'T'),
-    'C':('c', 'C', 'g', 'G'),
-    'G':('c', 'C', 'g', 'G'),
-    }
-# Default exclusivePairs
-pairs = [
-    ('gene', 'Intergenic'),
-    ('transcript', 'Regulatory'),
-    ('exon', 'Intron')
-    ]
+import globvars as gv
 
 
 class SNR:
@@ -87,7 +58,7 @@ class SNR:
     def __str__(self):
         # Displays the base, number of mismatches, and location
         return 'poly({})[-{}] @ {}:{:,}-{:,}'.format(
-            self.base if self.strand else compDict[self.base],
+            self.base if self.strand else gv.compDict[self.base],
             self.mism,
             self.record,
             self.start,
@@ -110,14 +81,14 @@ def measureGenome(fasta):
 
     """
     # Initiate the genome length to be measured
-    genomeLength = 0
+    genLen = 0
     # Keep genome open only as long as necessary, while going over each record
     #  to measure the total genome length.
     with open(fasta, 'r') as genome:
         for ch in SeqIO.parse(genome, 'fasta'):
-            genomeLength += len(ch.seq)
+            genLen += len(ch.seq)
             
-    return genomeLength
+    return genLen
 
 
 def getPieces(base, fasta, cpus, cFR):
@@ -143,8 +114,8 @@ def getPieces(base, fasta, cpus, cFR):
         multiple slices (tuples), such that [ [ (recordID, start, seq) ] ].
     """
     
-    # Grab a global variable to be changed in the course of this function
-    global totalPieces, genomeLength
+    # Grab global variables to be changed in the course of this function
+    global gv.totalPieces, gv.genomeLength
     
     def addSlice():
         """Helper function to manage adding of individual slices to the
@@ -167,15 +138,15 @@ def getPieces(base, fasta, cpus, cFR):
     
     print('Measuring the size of the genome...')
     # Set the bases to avoid for splitting
-    avoid = avoidSplits[base]
+    avoid = gv.avoidSplits[base]
     # Get the genome length if not already done before
-    if genomeLength == 0:
-        genomeLength = measureGenome(fasta)
+    if gv.genomeLength == 0:
+        gv.genomeLength = measureGenome(fasta)
     
     # Initiate the range of piece sizes as a reusable tuple (which is a range
     #  of pre-set franctions of the genome divided by the # of cpus) & announce
-    ran = (genomeLength//(cFR[0]*cpus), genomeLength//(cFR[1]*cpus))
-    print('The total genome length is {:,} bp.'.format(genomeLength))
+    ran = (gv.genomeLength//(cFR[0]*cpus), gv.genomeLength//(cFR[1]*cpus))
+    print('The total genome length is {:,} bp.'.format(gv.genomeLength))
     print(
         'Each piece will contain between {:,} and {:,} bp...'.format(*ran)
         )
@@ -213,10 +184,12 @@ def getPieces(base, fasta, cpus, cFR):
             allPieces.append(piece)
     
     # Save the total number of pieces to the respective global variable
-    totalPieces = len(allPieces)
+    gv.totalPieces = len(allPieces)
     # Sort the pieces in place by their total length, largest to smallest
     print(
-        'Sorting {:,} pieces by the total number of bp...'.format(totalPieces)
+        'Sorting {:,} pieces by the total number of bp...'.format(
+            gv.totalPieces
+            )
         )
     allPieces.sort(key = lambda x: sum([len(i[2]) for i in x]), reverse = True)
     
@@ -252,7 +225,7 @@ def findSNRs(base, piece, db_out, temp, mincont):
     """
 
     # Define the complement base to be sought
-    cBase = compDict[base]
+    cBase = gv.compDict[base]
     
     # Initiate the dicts for SNRs and their counts
     lengthToSNRs = collections.defaultdict(list)
@@ -281,7 +254,7 @@ def findSNRs(base, piece, db_out, temp, mincont):
             for b in (base, cBase):
                 # If found, keep testing the subsequent bases for this base in
                 #  either caps or non-caps
-                eitherCaps = capsDict[b]
+                eitherCaps = gv.capsDict[b]
                 if refseq[first] in eitherCaps:
                     # As long as last hasn't reached the end of the record and
                     #  the same base is found on the subsequent position,
@@ -381,6 +354,7 @@ def howLongSince(t_start):
             )
         )
 
+
 def collectResult(result):
     """Callback function for pooled function mapping. Can take only one input
     variable.
@@ -397,17 +371,18 @@ def collectResult(result):
     """
     
     # Get the global variables to be changed
-    global processed, resultSNRs, resultSNRcounts
+    global gv.processed, gv.resultSNRs, gv.resultSNRcounts
     
     # Unpack the result
     SNRdict, countDict = result
     # Go over the result dicts and add them to the respective global dicts
-    for length, SNRs in SNRdict.items(): resultSNRs[length].extend(SNRs)
-    for length, count in countDict.items(): resultSNRcounts[length] += count
+    for length, SNRs in SNRdict.items(): gv.resultSNRs[length].extend(SNRs)
+    for length, count in countDict.items(): gv.resultSNRcounts[length] += count
     # Count this piece as processed
-    processed += 1
+    gv.processed += 1
     # Announce progress
-    print('Processed split: {:,}/{:,}'.format(processed, totalPieces))
+    print('Processed split: {:,}/{:,}'.format(gv.processed, gv.totalPieces))
+    
     
 def saveSNRcsv(loc, lengthToSNRcounts):
     """Saving the SNR count dictionary as a csv file.
@@ -431,7 +406,8 @@ def saveSNRcsv(loc, lengthToSNRcounts):
             f.write('{},{}\n'.format(key, lengthToSNRcounts[key]))
     
     print('SNR counts saved to {}'.format(loc))
-            
+         
+    
 def savePKL(loc, var):
     """Saving any variable as a pkl file for later use.
 
@@ -451,7 +427,8 @@ def savePKL(loc, var):
         pickle.dump(var, f)
         
     print('File saved to {}'.format(loc))
-        
+     
+    
 def loadSNRcsv(loc):
     """Loading the SNR count dictionary as a csv file for further processing.
 
@@ -576,312 +553,5 @@ def processPoolSNRs(
     pool.close()
     # Join the processes
     pool.join()
-
-
-def normalizeLabels(
-        df,
-        out_feats,
-        out_db = None,
-        fasta = None,
-        exclusivePairs = pairs,
-        other = 'Exon'
-        ):
-    """Function to calculate what proportion of the genome is covered by each
-    of the respective labels and subsequenly normalize the df by these
-    proportions. If the flattened feats have not been processed previously,
-    they will be processed and saved (can take up to 5 hrs).
     
-    Parameters
-    ----------
-    df : (dataframe)
-        The df of measured SNR labels to be normalized.
-    out_feats : (str)
-        The location of the PKL file containing the dict of flattened feats.
-    fasta : (str), optional
-        The location of the FASTA reference sequence file. The default is None.
-    out_db : (str), optional
-        The location of the reference annotation database file. The default is
-        None.
-    exclusivePairs : (list), optional
-        A list of tuples with features and the respective labels assigned to
-        mark their absence, such that [ (feature, label) ]. The default is
-        [('gene','Intergenic'),('transcript','Regulatory'),('exon','Intron')].
-
-    Returns
-    -------
-    df_norm : (dataframe)
-        Normalized dataframe
-    """
-    
-    global genomeLength
-    
-    regions = collections.defaultdict(int)
-    # First, if not done yet, flatten the relevant features, using the
-    #  simplified peak-merging strategy from Biostats Final Project
-    # Note that GFF features are 1-based, closed intervals
-    if os.path.isfile(out_feats):
-        flatFeats = loadPKL(out_feats)
-        for k,feats in flatFeats.items():
-            # 1-based, closed intervals [start, end]
-            regions[k[:-1]] += sum([feat[2] - feat[1] + 1 for feat in feats])
-    else:
-        # Connect the db
-        db_conn = gffutils.FeatureDB(out_db, keep_order = True)
-        
-        # Initiate the variables needed
-        strands = ('+', '-')
-        featsOfInterest = [p[0] for p in exclusivePairs]
-        flatFeats = {}
-        
-        for featType in featsOfInterest:
-            # Go over each strand separately
-            for strd in strands:
-                print('Going over {}{}s'.format(strd, featType))
-                featList = []
-                # Iterate through ALL features of this type, for each strand.
-                for feat in db_conn.all_features(
-                        featuretype = featType,
-                        strand = strd
-                        ):
-                    # Save in a tuple: (ref, start, end)
-                    nFeat = (feat.seqid, feat.start, feat.end)
-                    # Go over the previous ones, check for overlap on the same
-                    #  ref and save all the overlaps found in a list.
-                    overlaps = []
-                    for oFeat in featList:
-                        # If the ref is the same and (
-                        #  (the new Feat's beginning is within the old Feat)
-                        #  or (the new Feat's end is within the oldFeat)
-                        #  or (the newFeat spans the oldFeat)
-                        #  ), add old Feat to the overlaps list
-                        if nFeat[0] == oFeat[0] and (
-                            (nFeat[1] >= oFeat[1] and nFeat[1] <= oFeat[2]) \
-                            or (nFeat[2] >= oFeat[1] and nFeat[2] <= oFeat[2]) \
-                            or (nFeat[1] < oFeat[1] and nFeat[2] > oFeat[2])
-                            ):
-                            overlaps.append(oFeat)
-                    #  If overlaps have been found, merge with the new one
-                    if overlaps != []:
-                        # Initialize the start & end of the merged feature
-                        #  using the new Feat (not in the overlaps list)
-                        ref = nFeat[0]; start = nFeat[1]; end = nFeat[2]
-                        # Go over all the overlaps & update the start & end of
-                        #  the merged feature as necessary
-                        for ft in overlaps:
-                            if ft[1] < start:
-                                start = ft[1]
-                            if ft[2] > end:
-                                end = ft[2]
-                            # When done considering this feature, remove it
-                            #  from the master list
-                            featList.remove(ft)
-                        # When done, add the new merged feature to the list
-                        featList.append((ref, start, end))
-                    # If no overlap has been found, add new as a new one
-                    else:
-                        featList.append(nFeat)
-                # Once all features have been flattened, add up their lengths
-                for feat in featList:
-                    # 1-based, closed intervals [start, end]
-                    regions[featType] += (feat[2] - feat[1] + 1)
-                # Save the feats in the master list to be saved
-                flatFeats['{}{}'.format(featType, strd)] = sorted(featList)
-        # Save the flattened feats to speed up the process in the future
-        savePKL(out_feats, flatFeats)
-    
-    # Measure the genome length, if not already done
-    if genomeLength == 0:
-        genomeLength = measureGenome(fasta)
-    # Now calculate the proportion of genome covered by each label - e.g.,
-    #  Intergenic = genome - genes
-    #  Regulatory = genes - transcripts
-    #  Intron = transcripts - exons
-    #  Exon = exons
-
-    # The first label in exclusivePairs depends on the length of the genome
-    labelProps = np.array(
-        [(genomeLength*2 - regions[exclusivePairs[0][0]]) / (genomeLength*2)]
-        )
-    # Add values for the subsequent labels in exclusivePairs
-    for i in range(1,len(exclusivePairs)):
-        labelProps = np.concatenate((labelProps, np.array([
-            (regions[exclusivePairs[i-1][0]] - regions[exclusivePairs[i][0]]) \
-                / (genomeLength*2)
-            ])))
-    # Add the last one, independent of other labels
-    labelProps = np.concatenate(
-        (labelProps, np.array([regions[exclusivePairs[-1][0]] / (genomeLength*2)]))
-        )
-    
-    # Normalize the df using these proportions
-    df_norm = pd.DataFrame(
-        data = df.values / labelProps[np.newaxis, :],
-        columns = df.columns,
-        index = df.index
-        )
-    
-    return df_norm
-
-
-def getBaseComp(fasta, showGC = True):
-    """Function to obtain the base composition of a genome by scanning.
-    Optionally, the GC% is shown as a fact-check on correct processing.
-
-    Parameters
-    ----------
-    fasta : (str)
-        File path of the fasta reference file.
-    showGC : (bool), optional
-        Switch for showing the GC% content of this genome. The default is True.
-
-    Returns
-    -------
-    bases : (defaultdict)
-        { base : count }
-    """
-
-    bases = collections.defaultdict(int)
-
-    print('Scanning the genome for base composition...')
-    # Make sure that the fasta file is open only temporarily
-    with open(fasta, 'r') as genome:
-        # Go over each base in each record in the genome and count each base
-        for record in SeqIO.parse(genome, "fasta"):
-            for base in record.seq:
-                bases[base] += 1
-    # Optionally, show the GC% content of this genome
-    if showGC:
-        gc = bases['C'] + bases['c'] + bases['G'] + bases['g']
-        sumKnownBases = bases['A'] + bases['a'] + bases['T'] + bases['t'] \
-            + bases['C'] + bases['c'] + bases['G'] + bases['g']
-        print(
-            'Scanning finished, G/C content: {:.2%}'.format(
-                round(gc / sumKnownBases, 2)
-                )
-            )
-    
-    return bases
-
-
-def countsCheck(base, lengthToSNRcounts, out_bases, fasta = None):
-    """Check whether the sum of the bases in question obtained from SNR counts
-    and scanning the genome are congruent.
-    Note: 'bases' has to be a (defaultdict) because if non-caps bases are not
-    defined, a simple (dict) would return an error.
-
-    Parameters
-    ----------
-    base : (str)
-        The base in question.
-    lengthToSNRcounts : (dict)
-        { SNRlength : SNRcount }
-    out_bases : (str)
-        File path of the pre-calculated bases file.
-    fasta : (str)
-        File path of the fasta reference file. The default is None.
-
-    Returns
-    -------
-    None.
-    """
-    
-    # Sum the number of bases contained in the SNR counts
-    SNRbases = 0
-    for k,v in lengthToSNRcounts.items():
-        SNRbases += int(k) * int(v)
-    
-    # Load the bases dictionary, if available
-    if os.path.isfile(out_bases):
-        bases = loadPKL(out_bases)
-    # Otherwise, scan the genome to create it
-    else:
-        bases = getBaseComp(fasta)
-        savePKL(out_bases, bases)
-    # Get the number of bases (including complementary and non-caps) from the
-    #  genome scan.
-    scanned = bases[capsDict[base][0]] \
-        + bases[capsDict[base][1]] \
-            + bases[capsDict[compDict[base]][0]] \
-                + bases[capsDict[compDict[base]][1]]
-    
-    if SNRbases == scanned:
-        print(
-            'The total number of {}/{} bases ({:,}) checks out!'.format(
-                base,
-                compDict[base],
-                SNRbases
-                )
-            )
-    else:
-        print(
-            '{}/{} bases in SNRs: {:,}; from genome scanning {:,}'.format(
-                base,
-                compDict[base],
-                SNRbases,
-                scanned
-                )
-            )
-
-
-def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
-    """Obtain a df of SNR Length, Observed counts, and Observed/Expected
-    ratios.
-    Note: 'bases' has to be a (defaultdict) because if non-caps bases are not
-    defined, a simple (dict) would return an error.
-
-    Parameters
-    ----------
-    base : (str)
-        The base in question.
-    lengthToSNRcounts : (dict)
-        { SNRlength : SNRcount }
-    out_bases : (str)
-        File path of the pre-calculated bases file.
-    fasta : (str)
-        File path of the fasta reference file. The default is None.
-
-    Returns
-    -------
-    df : (pandas.dataframe)
-        The table with calculated values.
-    """
-    
-    # Load the bases dictionary, if available
-    if os.path.isfile(out_bases):
-        bases = loadPKL(out_bases)
-    # Otherwise, scan the genome to create it
-    else:
-        bases = getBaseComp(fasta)
-        savePKL(out_bases, bases)
-    
-    sumKnownBases = bases['A'] + bases['a'] + bases['T'] + bases['t'] \
-        + bases['C'] + bases['c'] + bases['G'] + bases['g']
-    
-    # Calculate the frequency of the base in question and its complement
-    pBase = (bases[capsDict[base][0]] \
-             + bases[capsDict[base][1]]) / sumKnownBases
-    pComp = (bases[capsDict[compDict[base]][0]] \
-             + bases[capsDict[compDict[base]][1]]) / sumKnownBases
-    
-    # Obtain the table data as a list of 3 respective lists: SNRlength,
-    #  Observed absolute # of SNRs, and O/E ratio
-    polyLen = []
-    obs = []
-    oe = []
-    for k,v in lengthToSNRcounts.items():
-        polyLen.append(int(k))
-        obs.append(int(v))
-        oe.append(
-            (int(v)/int(sumKnownBases)) \
-                / ( (1-pBase) * pBase**int(k) * (1-pBase) \
-                   + (1-pComp) * pComp**int(k) * (1-pComp) )
-            )
-    table_data = [polyLen,obs,oe]
-    # Construct the df with the desired column names & types
-    df = pd.DataFrame(data = pd.DataFrame(data = table_data).T)
-    df.columns = ('SNR Length','Observed', 'O/E')
-    df['Observed'] = df['Observed'].astype(int)
-    df['SNR Length'] = df['SNR Length'].astype(int)
-    df.sort_values(by = ['SNR Length'], inplace = True)
-    
-    return df
+    return gv.resultSNRs, gv.resultSNRcounts
