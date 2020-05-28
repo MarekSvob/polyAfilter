@@ -13,13 +13,27 @@ import pickle
 import gffutils
 import tempfile
 import shutil
-import numpy as np
-import pandas as pd
 from Bio import SeqIO
 from multiprocessing import Pool
 from random import randint
 
-import globvars as gv
+import univars as uv
+
+
+# Global result, tracking, and help variables to be initiated
+resultSNRs = collections.defaultdict(list)
+resultSNRcounts = collections.defaultdict(int)
+genomeLengths = collections.defaultdict(int)
+totalPieces = 0
+processed = 0
+
+# A dictionary of letters to avoid for splitting, given the base sought
+avoidSplits = {
+    'A':('a', 'A', 't', 'T'),
+    'T':('a', 'A', 't', 'T'),
+    'C':('c', 'C', 'g', 'G'),
+    'G':('c', 'C', 'g', 'G'),
+    }
 
 
 class SNR:
@@ -58,7 +72,7 @@ class SNR:
     def __str__(self):
         # Displays the base, number of mismatches, and location
         return 'poly({})[-{}] @ {}:{:,}-{:,}'.format(
-            self.base if self.strand else gv.compDict[self.base],
+            self.base if self.strand else uv.compDict[self.base],
             self.mism,
             self.record,
             self.start,
@@ -78,17 +92,26 @@ def measureGenome(fasta):
     -------
     genomeLength : (int)
         The total length of the genome.
-
     """
-    # Initiate the genome length to be measured
-    genLen = 0
-    # Keep genome open only as long as necessary, while going over each record
-    #  to measure the total genome length.
-    with open(fasta, 'r') as genome:
-        for ch in SeqIO.parse(genome, 'fasta'):
-            genLen += len(ch.seq)
-            
-    return genLen
+    
+    global genomeLengths
+    
+    # Check if the fasta in question has already been measured
+    if genomeLengths[fasta] == 0:
+        print('Measuring the size of the genome...')
+        # Initiate the genome length to be measured
+        genLen = 0
+        # Keep genome open only as long as necessary, while going over each record
+        #  to measure the total genome length.
+        with open(fasta, 'r') as genome:
+            for ch in SeqIO.parse(genome, 'fasta'):
+                genLen += len(ch.seq)
+        genomeLengths[fasta] = genLen
+        print(
+            'The total genome length is {:,} bp.'.format(genomeLengths[fasta])
+            )
+    
+    return genomeLengths[fasta]
 
 
 def getPieces(base, fasta, cpus, cFR):
@@ -115,7 +138,7 @@ def getPieces(base, fasta, cpus, cFR):
     """
     
     # Grab global variables to be changed in the course of this function
-    global gv.totalPieces, gv.genomeLength
+    global totalPieces
     
     def addSlice():
         """Helper function to manage adding of individual slices to the
@@ -136,17 +159,14 @@ def getPieces(base, fasta, cpus, cFR):
             pieceLen = 0
             unit = randint(*ran)
     
-    print('Measuring the size of the genome...')
     # Set the bases to avoid for splitting
-    avoid = gv.avoidSplits[base]
-    # Get the genome length if not already done before
-    if gv.genomeLength == 0:
-        gv.genomeLength = measureGenome(fasta)
+    avoid = avoidSplits[base]
+    # Get the genome length
+    genLen = measureGenome(fasta)
     
     # Initiate the range of piece sizes as a reusable tuple (which is a range
     #  of pre-set franctions of the genome divided by the # of cpus) & announce
-    ran = (gv.genomeLength//(cFR[0]*cpus), gv.genomeLength//(cFR[1]*cpus))
-    print('The total genome length is {:,} bp.'.format(gv.genomeLength))
+    ran = (genLen//(cFR[0]*cpus), genLen//(cFR[1]*cpus))
     print(
         'Each piece will contain between {:,} and {:,} bp...'.format(*ran)
         )
@@ -184,11 +204,11 @@ def getPieces(base, fasta, cpus, cFR):
             allPieces.append(piece)
     
     # Save the total number of pieces to the respective global variable
-    gv.totalPieces = len(allPieces)
+    totalPieces = len(allPieces)
     # Sort the pieces in place by their total length, largest to smallest
     print(
         'Sorting {:,} pieces by the total number of bp...'.format(
-            gv.totalPieces
+            totalPieces
             )
         )
     allPieces.sort(key = lambda x: sum([len(i[2]) for i in x]), reverse = True)
@@ -225,7 +245,7 @@ def findSNRs(base, piece, db_out, temp, mincont):
     """
 
     # Define the complement base to be sought
-    cBase = gv.compDict[base]
+    cBase = uv.compDict[base]
     
     # Initiate the dicts for SNRs and their counts
     lengthToSNRs = collections.defaultdict(list)
@@ -254,7 +274,7 @@ def findSNRs(base, piece, db_out, temp, mincont):
             for b in (base, cBase):
                 # If found, keep testing the subsequent bases for this base in
                 #  either caps or non-caps
-                eitherCaps = gv.capsDict[b]
+                eitherCaps = uv.capsDict[b]
                 if refseq[first] in eitherCaps:
                     # As long as last hasn't reached the end of the record and
                     #  the same base is found on the subsequent position,
@@ -371,17 +391,17 @@ def collectResult(result):
     """
     
     # Get the global variables to be changed
-    global gv.processed, gv.resultSNRs, gv.resultSNRcounts
+    global processed, resultSNRs, resultSNRcounts
     
     # Unpack the result
     SNRdict, countDict = result
     # Go over the result dicts and add them to the respective global dicts
-    for length, SNRs in SNRdict.items(): gv.resultSNRs[length].extend(SNRs)
-    for length, count in countDict.items(): gv.resultSNRcounts[length] += count
+    for length, SNRs in SNRdict.items(): resultSNRs[length].extend(SNRs)
+    for length, count in countDict.items(): resultSNRcounts[length] += count
     # Count this piece as processed
-    gv.processed += 1
+    processed += 1
     # Announce progress
-    print('Processed split: {:,}/{:,}'.format(gv.processed, gv.totalPieces))
+    print('Processed split: {:,}/{:,}'.format(processed, totalPieces))
     
     
 def saveSNRcsv(loc, lengthToSNRcounts):
@@ -554,4 +574,4 @@ def processPoolSNRs(
     # Join the processes
     pool.join()
     
-    return gv.resultSNRs, gv.resultSNRcounts
+    return resultSNRs, resultSNRcounts

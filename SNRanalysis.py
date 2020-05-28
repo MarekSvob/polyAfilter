@@ -8,12 +8,20 @@ Created on Sat May 16 18:07:19 2020
 
 import os
 import collections
+import gffutils
 import pandas as pd
 import numpy as np
 from Bio import SeqIO
 
-from SNRdetection import loadPKL, savePKL
-import globvars as gv
+from SNRdetection import loadPKL, savePKL, measureGenome
+import univars as uv
+
+# Default exclusivePairs
+pairs = [
+    ('gene', 'Intergenic'),
+    ('transcript', 'Regulatory'),
+    ('exon', 'Intron')
+    ]
 
 
 def getBaseComp(fasta, showGC = True):
@@ -92,16 +100,16 @@ def countsCheck(base, lengthToSNRcounts, out_bases, fasta = None):
         savePKL(out_bases, bases)
     # Get the number of bases (including complementary and non-caps) from the
     #  genome scan.
-    scanned = bases[gv.capsDict[base][0]] \
-        + bases[gv.capsDict[base][1]] \
-            + bases[gv.capsDict[gv.compDict[base]][0]] \
-                + bases[gv.capsDict[gv.compDict[base]][1]]
+    scanned = bases[uv.capsDict[base][0]] \
+        + bases[uv.capsDict[base][1]] \
+            + bases[uv.capsDict[uv.compDict[base]][0]] \
+                + bases[uv.capsDict[uv.compDict[base]][1]]
     
     if SNRbases == scanned:
         print(
             'The total number of {}/{} bases ({:,}) checks out!'.format(
                 base,
-                gv.compDict[base],
+                uv.compDict[base],
                 SNRbases
                 )
             )
@@ -109,7 +117,7 @@ def countsCheck(base, lengthToSNRcounts, out_bases, fasta = None):
         print(
             '{}/{} bases in SNRs: {:,}; from genome scanning {:,}'.format(
                 base,
-                gv.compDict[base],
+                uv.compDict[base],
                 SNRbases,
                 scanned
                 )
@@ -151,10 +159,10 @@ def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
         + bases['C'] + bases['c'] + bases['G'] + bases['g']
     
     # Calculate the frequency of the base in question and its complement
-    pBase = (bases[gv.capsDict[base][0]] \
-             + bases[gv.capsDict[base][1]]) / sumKnownBases
-    pComp = (bases[gv.capsDict[gv.compDict[base]][0]] \
-             + bases[gv.capsDict[gv.compDict[base]][1]]) / sumKnownBases
+    pBase = (bases[uv.capsDict[base][0]] \
+             + bases[uv.capsDict[base][1]]) / sumKnownBases
+    pComp = (bases[uv.capsDict[uv.compDict[base]][0]] \
+             + bases[uv.capsDict[uv.compDict[base]][1]]) / sumKnownBases
     
     # Obtain the table data as a list of 3 respective lists: SNRlength,
     #  Observed absolute # of SNRs, and O/E ratio
@@ -220,7 +228,7 @@ def SNRfeatureSets(lengthToSNRs):
     return df
 
 
-def getColNames(df, exclusivePairs = gv.pairs, other = 'Exon'):
+def getColNames(df, exclusivePairs = pairs, other = 'Exon'):
     """Function to create a label to each df column (featureSet) according to
     the exclusivePairs - i.e., if feature is absent, label is assigned.
     
@@ -257,7 +265,7 @@ def getColNames(df, exclusivePairs = gv.pairs, other = 'Exon'):
     return named_cols
 
 
-def SNRlabelProps(lengthToSNRs, exclusivePairs = gv.pairs, other = 'Exon'):
+def SNRlabelProps(lengthToSNRs, exclusivePairs = pairs, other = 'Exon'):
     """Function that prepares a df of proportions of labeled SNRs for each
     length.    
 
@@ -315,7 +323,7 @@ def normalizeLabels(
         out_feats,
         out_db = None,
         fasta = None,
-        exclusivePairs = gv.pairs,
+        exclusivePairs = pairs,
         other = 'Exon'
         ):
     """Function to calculate what proportion of the genome is covered by each
@@ -344,8 +352,6 @@ def normalizeLabels(
     df_norm : (dataframe)
         Normalized dataframe
     """
-    
-    global gv.genomeLength
     
     regions = collections.defaultdict(int)
     # First, if not done yet, flatten the relevant features, using the
@@ -421,9 +427,9 @@ def normalizeLabels(
         # Save the flattened feats to speed up the process in the future
         savePKL(out_feats, flatFeats)
     
-    # Measure the genome length, if not already done
-    if gv.genomeLength == 0:
-        gv.genomeLength = measureGenome(fasta)
+    # Get the genome length for this fasta file
+    genLen = measureGenome(fasta)
+
     # Now calculate the proportion of genome covered by each label - e.g.,
     #  Intergenic = genome - genes
     #  Regulatory = genes - transcripts
@@ -432,17 +438,17 @@ def normalizeLabels(
 
     # The first label in exclusivePairs depends on the length of the genome
     labelProps = np.array(
-        [(gv.genomeLength*2 - regions[exclusivePairs[0][0]]) / (gv.genomeLength*2)]
+        [(genLen*2 - regions[exclusivePairs[0][0]]) / (genLen*2)]
         )
     # Add values for the subsequent labels in exclusivePairs
     for i in range(1,len(exclusivePairs)):
         labelProps = np.concatenate((labelProps, np.array([
             (regions[exclusivePairs[i-1][0]] - regions[exclusivePairs[i][0]]) \
-                / (gv.genomeLength*2)
+                / (genLen*2)
             ])))
     # Add the last one, independent of other labels
     labelProps = np.concatenate(
-        (labelProps, np.array([regions[exclusivePairs[-1][0]] / (gv.genomeLength*2)]))
+        (labelProps, np.array([regions[exclusivePairs[-1][0]] / (genLen*2)]))
         )
     
     # Normalize the df using these proportions
