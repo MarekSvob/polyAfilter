@@ -19,8 +19,10 @@ from random import randint
 
 
 # Global result, tracking, and help variables to be initiated
-resultSNRs = collections.defaultdict(list)
-resultSNRcounts = collections.defaultdict(int)
+resSNRs = collections.defaultdict(list)
+resSNRcounts = collections.Counter()
+resConcFeats = collections.defaultdict(collections.Counter)
+resDiscFeats = collections.defaultdict(collections.Counter)
 genomeLengths = collections.defaultdict(int)
 totalPieces = 0
 processed = 0
@@ -90,7 +92,7 @@ class SNR:
             )
 
 
-def measureGenome(fasta):
+def getGenomeLength(fasta):
     """Function to measure the size of the genome.
 
     Parameters
@@ -111,8 +113,8 @@ def measureGenome(fasta):
         print('Measuring the size of the genome...')
         # Initiate the genome length to be measured
         genLen = 0
-        # Keep genome open only as long as necessary, while going over each record
-        #  to measure the total genome length.
+        # Keep genome open only as long as necessary, while going over each
+        #  record to measure the total genome length.
         with open(fasta, 'r') as genome:
             for ch in SeqIO.parse(genome, 'fasta'):
                 genLen += len(ch.seq)
@@ -147,7 +149,7 @@ def getPieces(base, fasta, cpus, cFR):
         multiple slices (tuples), such that [ [ (recordID, start, seq) ] ].
     """
     
-    # Grab global variables to be changed in the course of this function
+    # Grab global variable to be changed in the course of this function
     global totalPieces
     
     def addSlice():
@@ -172,7 +174,7 @@ def getPieces(base, fasta, cpus, cFR):
     # Set the bases to avoid for splitting
     avoid = avoidSplits[base]
     # Get the genome length
-    genLen = measureGenome(fasta)
+    genLen = getGenomeLength(fasta)
     
     # Initiate the range of piece sizes as a reusable tuple (which is a range
     #  of pre-set franctions of the genome divided by the # of cpus) & announce
@@ -250,7 +252,7 @@ def findSNRs(base, piece, db_out, temp, mincont):
     -------
     lengthToSNRs : (dict)
         { length : [ SNRs ] }
-    lengthToSNRcounts : (dict)
+    lengthToSNRcounts : (counter)
         { length : SNRcount }
     """
 
@@ -258,8 +260,10 @@ def findSNRs(base, piece, db_out, temp, mincont):
     cBase = compDict[base]
     
     # Initiate the dicts for SNRs and their counts
-    lengthToSNRs = collections.defaultdict(list)
-    lengthToSNRcounts = collections.defaultdict(int)
+    lenToSNRs = collections.defaultdict(list)
+    lenToSNRcounts = collections.Counter()
+    lenToConcFeats = collections.defaultdict(collections.Counter)
+    lenToDiscFeats = collections.defaultdict(collections.Counter)
     
     # Make a temporary copy of the db file for this thread to speed up the
     #  process (SQLite3 dbs do not truly support parallel inquiries)
@@ -294,32 +298,33 @@ def findSNRs(base, piece, db_out, temp, mincont):
                     # Calculate the length of the SNR when done
                     length = last - first
                     # Count the SNR by its length
-                    lengthToSNRcounts[length] += 1
+                    lenToSNRcounts.update({length : 1})
                     # If the size is sufficient, save the SNR into the dict by
                     #  its length with its attributes
-                    if length >= mincont:
-                        # Set the order of strands to look up features, always
-                        #  first concordant with the SNR, then discordant
-                        strds = ('+', '-') if b == base else ('-', '+')
-                        # Initialize the list [cFeats, cGenes, dFeats, dGenes]
-                        elems = []
-                        for strd in strds:
-                            # Initialize the set of features & genes
-                            feats = set()
-                            genes = collections.defaultdict(bool)
-                            # For each feature from the db spanned by the SNR
-                            for ft in db_conn.region(
-                                region = (s[0], s[1] + first, s[1] + last + 1),
-                                strand = strd
-                                ):
-                            # Note that the region() query is a 1-based (a,b)
-                            #  open interval, as documented here:
-                            #  https://github.com/daler/gffutils/issues/129
-                                # Save the feature type & add to the set
-                                feat = ft.featuretype
-                                feats.update({feat})
-                                # If this is a transcript, make sure that the gene
-                                #  (a list of 1) it represents is in the dict
+                    # Set the order of strands to look up features, always
+                    #  first concordant with the SNR, then discordant
+                    strds = ('+', '-') if b == base else ('-', '+')
+                    # Initialize the list [cFeats, cGenes, dFeats, dGenes]
+                    elems = []
+                    for strd in strds:
+                        # Initialize the set of features & genes
+                        feats = set()
+                        genes = collections.defaultdict(bool)
+                        # For each feature from the db spanned by the SNR
+                        for ft in db_conn.region(
+                            region = (s[0], s[1] + first, s[1] + last + 1),
+                            strand = strd
+                            ):
+                        # Note that the region() query is a 1-based (a,b)
+                        #  open interval, as documented here:
+                        #  https://github.com/daler/gffutils/issues/129
+                            # Save the feature type & add to the set
+                            feat = ft.featuretype
+                            feats.update({feat})
+                            # Look up gene info only if eventually added
+                            if length >= mincont:
+                                # If this is a transcript, make sure that the
+                                #  gene (a list of 1) it represents is in dict
                                 if feat in ('transcript', 'mRNA'):
                                     # If gene_id is N/A, get 'gene' (DM genome)
                                     [g] = ft.attributes['gene_id'] \
@@ -336,11 +341,16 @@ def findSNRs(base, piece, db_out, temp, mincont):
                                     [g] = ft.attributes['gene_id'] \
                                         if 'gene_id' in ft.attributes.keys() \
                                             else ft.attributes['gene']
-                                    genes[g] = True
-                            elems.append(feats)
-                            elems.append(genes)
-                        # Now add the new SNR to the dict (keeping itr 0-based)
-                        lengthToSNRs[length].append(
+                                    genes[g] = True                            
+                        # Save the elements
+                        elems.append(feats)
+                        elems.append(genes)
+                    # Count the feats in the appropriate counter
+                    lenToConcFeats[length].update({frozenset(elems[0]) : 1})
+                    lenToDiscFeats[length].update({frozenset(elems[2]) : 1})
+                    # If the SNR is large enough, add the SNR to the dict
+                    if length >= mincont:
+                        lenToSNRs[length].append(
                             SNR(
                                 base,
                                 s[0],
@@ -358,7 +368,7 @@ def findSNRs(base, piece, db_out, temp, mincont):
             # Move over the frame for the new potential SNR
             first = last
     
-    return lengthToSNRs, lengthToSNRcounts
+    return lenToSNRs, lenToSNRcounts, lenToConcFeats, lenToDiscFeats
 
 
 def howLongSince(t_start):
@@ -401,13 +411,15 @@ def collectResult(result):
     """
     
     # Get the global variables to be changed
-    global processed, resultSNRs, resultSNRcounts
+    global processed, resSNRs, resSNRcounts, resConcFeats, resDiscFeats
     
     # Unpack the result
-    SNRdict, countDict = result
+    lenToSNRs, lenToSNRcounts, lenToConcFeats, lenToDiscFeats = result
     # Go over the result dicts and add them to the respective global dicts
-    for length, SNRs in SNRdict.items(): resultSNRs[length].extend(SNRs)
-    for length, count in countDict.items(): resultSNRcounts[length] += count
+    for length, SNRs in lenToSNRs.items(): resSNRs[length].extend(SNRs)
+    resSNRcounts.update(lenToSNRcounts)
+    for length, counts in lenToConcFeats: resConcFeats[length].update(counts)
+    for length, counts in lenToDiscFeats: resDiscFeats[length].update(counts)
     # Count this piece as processed
     processed += 1
     # Announce progress
@@ -506,11 +518,15 @@ def loadPKL(loc):
     return var
 
 
-def processPoolSNRs(
+def getSNRs(
         base,
         fasta,
         gff,
-        db_out,
+        out_db,
+        out_snrs,
+        out_csv,
+        out_concf,
+        out_discf,
         temp = '.',
         mincont = 5,
         cpus = 70,
@@ -527,8 +543,14 @@ def processPoolSNRs(
         The location of the FASTA reference sequence file.
     gff : (str)
         The location of the GFF reference annotation file.
-    db_out : (str)
+    out_db : (str)
         The location of the reference annotation database file. If none exists
+        at that location, one will be created.
+    out_snrs : (str)
+        The location of the previously created SNRs pkl file. If none exists
+        at that location, one will be created.
+    out_csv : (str)
+        The location of the previously created SNRs count pkl. If none exists
         at that location, one will be created.
     temp : (str)
         The location to create temporary copies of the reference annotation
@@ -548,40 +570,59 @@ def processPoolSNRs(
 
     Returns
     -------
-    None.
+    resSNRs : (dict)
+        { SNRlength : [ SNR ] }
+    resSNRcounts : (dict)
+        { SNRlength : # of SNRs }
     """
-
-    # Create a database from the gff if it does not exist yet
-    print('Checking the database...')
-    if not os.path.isfile(db_out):
-        print('None had been created - creating a new database...')
-        gffutils.create_db(
-            gff,
-            dbfn = db_out,
-            force = True,
-            merge_strategy = 'create_unique',
-            id_spec = ['ID', 'Name'],
-            verbose = True
-            )
-    print('The database is ready.')
-    # Create the list of pieces to be processed in parallel
-    allPieces = getPieces(base, fasta, cpus, cFR)
-    print('Looking for SNRs across {} parallel processes...'.format(cpus))
-    # Create a pool of workers with given the # of processes & max tasks for
-    #  each one before it is restarted
-    pool = Pool(processes = cpus, maxtasksperchild = maxtasks)
-    # Queue up the processes in the order of the list. The results are sent to
-    #  the collectResult() function and from there in turn to the global
-    #  result variables.
-    for piece in allPieces:
-        pool.apply_async(
-            func = findSNRs,
-            args = (base, piece, db_out, temp, mincont),
-            callback = collectResult
-            )
-    # Close the pool
-    pool.close()
-    # Join the processes
-    pool.join()
     
-    return resultSNRs, resultSNRcounts
+    global resSNRs, resSNRcounts, resConcFeats, resDiscFeats
+    
+    # If available, just load the previously saved data
+    if os.path.isfile(out_snrs) and os.path.isfile(out_csv) \
+        and os.path.isfile(out_concf) and os.path.isfile(out_discf):
+        resSNRs = loadPKL(out_snrs)
+        resSNRcounts = loadSNRcsv(out_csv)
+        resConcFeats = loadPKL(out_concf)
+        resDiscFeats = loadPKL(out_discf)
+    # Otherwise create it by processing
+    else:
+        # Create a database from the gff if it does not exist yet
+        print('Checking for a database...')
+        if not os.path.isfile(out_db):
+            print('None had been created - creating a new database...')
+            gffutils.create_db(
+                gff,
+                dbfn = out_db,
+                force = True,
+                merge_strategy = 'create_unique',
+                id_spec = ['ID', 'Name'],
+                verbose = True
+                )
+        print('The database is ready.')
+        # Create the list of pieces to be processed in parallel
+        allPieces = getPieces(base, fasta, cpus, cFR)
+        print('Looking for SNRs across {} parallel processes...'.format(cpus))
+        # Create a pool of workers with given the # of processes & max tasks
+        #  for each one before it is restarted
+        pool = Pool(processes = cpus, maxtasksperchild = maxtasks)
+        # Queue up the processes in the order of the list. The results are sent
+        #  to the collectResult() function and from there in turn to the global
+        #  result variables.
+        for piece in allPieces:
+            pool.apply_async(
+                func = findSNRs,
+                args = (base, piece, out_db, temp, mincont),
+                callback = collectResult
+                )
+        # Close the pool
+        pool.close()
+        # Join the processes
+        pool.join()
+        # Save the newly processed data
+        savePKL(out_snrs, resSNRs)
+        saveSNRcsv(out_csv, resSNRcounts)
+        savePKL(out_concf, resConcFeats)
+        savePKL(out_discf, resDiscFeats)
+    
+    return resSNRs, resSNRcounts, resConcFeats, resDiscFeats

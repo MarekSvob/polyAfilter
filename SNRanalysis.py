@@ -13,7 +13,7 @@ import pandas as pd
 import numpy as np
 from Bio import SeqIO
 
-from SNRdetection import loadPKL, savePKL, measureGenome, compDict, capsDict
+from SNRdetection import loadPKL, savePKL, getGenomeLength, compDict, capsDict
 
 # Default exclusivePairs
 pairs = [
@@ -23,14 +23,16 @@ pairs = [
     ]
 
 
-def getBaseComp(fasta, showGC = True):
-    """Function to obtain the base composition of a genome by scanning.
-    Optionally, the GC% is shown as a fact-check on correct processing.
+def getBaseComp(out_bases, fasta = None, showGC = True):
+    """Function to obtain the base composition of a genome by scanning. Once
+    this is done once for a given fasta file, the result is saved and from then
+    on, always retreived. Optionally, the GC% is shown as a fact-check on
+    correct processing.
 
     Parameters
     ----------
-    fasta : (str)
-        File path of the fasta reference file.
+    fasta : (str), optional
+        File path of the fasta reference file. The default is None.
     showGC : (bool), optional
         Switch for showing the GC% content of this genome. The default is True.
 
@@ -39,26 +41,33 @@ def getBaseComp(fasta, showGC = True):
     bases : (defaultdict)
         { base : count }
     """
-
-    bases = collections.defaultdict(int)
-
-    print('Scanning the genome for base composition...')
-    # Make sure that the fasta file is open only temporarily
-    with open(fasta, 'r') as genome:
-        # Go over each base in each record in the genome and count each base
-        for record in SeqIO.parse(genome, "fasta"):
-            for base in record.seq:
-                bases[base] += 1
-    # Optionally, show the GC% content of this genome
-    if showGC:
-        gc = bases['C'] + bases['c'] + bases['G'] + bases['g']
-        sumKnownBases = bases['A'] + bases['a'] + bases['T'] + bases['t'] \
-            + bases['C'] + bases['c'] + bases['G'] + bases['g']
-        print(
-            'Scanning finished, G/C content: {:.2%}'.format(
-                round(gc / sumKnownBases, 2)
+    
+    # Load the bases dictionary, if available
+    if os.path.isfile(out_bases):
+        bases = loadPKL(out_bases)
+    # Otherwise, scan the genome to create it
+    else:
+        bases = collections.defaultdict(int)
+    
+        print('Scanning the genome for base composition...')
+        # Make sure that the fasta file is open only temporarily
+        with open(fasta, 'r') as genome:
+            # Go over each base in each record in the genome and count each
+            for record in SeqIO.parse(genome, "fasta"):
+                for base in record.seq:
+                    bases[base] += 1
+        # Save the bases
+        savePKL(out_bases, bases)
+        # Optionally, show the GC% content of this genome
+        if showGC:
+            gc = bases['C'] + bases['c'] + bases['G'] + bases['g']
+            sumKnownBases = bases['A'] + bases['a'] + bases['T'] + bases['t'] \
+                + bases['C'] + bases['c'] + bases['G'] + bases['g']
+            print(
+                'Scanning finished, G/C content: {:.2%}'.format(
+                    round(gc / sumKnownBases, 2)
+                    )
                 )
-            )
     
     return bases
 
@@ -77,7 +86,7 @@ def countsCheck(base, lengthToSNRcounts, out_bases, fasta = None):
         { SNRlength : SNRcount }
     out_bases : (str)
         File path of the pre-calculated bases file.
-    fasta : (str)
+    fasta : (str), optional
         File path of the fasta reference file. The default is None.
 
     Returns
@@ -90,13 +99,8 @@ def countsCheck(base, lengthToSNRcounts, out_bases, fasta = None):
     for k,v in lengthToSNRcounts.items():
         SNRbases += int(k) * int(v)
     
-    # Load the bases dictionary, if available
-    if os.path.isfile(out_bases):
-        bases = loadPKL(out_bases)
-    # Otherwise, scan the genome to create it
-    else:
-        bases = getBaseComp(fasta)
-        savePKL(out_bases, bases)
+    # Get the base composition of the genome
+    bases = getBaseComp(out_bases, fasta = fasta)
     # Get the number of bases (including complementary and non-caps) from the
     #  genome scan.
     scanned = bases[capsDict[base][0]] \
@@ -146,13 +150,8 @@ def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
         The table with calculated values.
     """
     
-    # Load the bases dictionary, if available
-    if os.path.isfile(out_bases):
-        bases = loadPKL(out_bases)
-    # Otherwise, scan the genome to create it
-    else:
-        bases = getBaseComp(fasta)
-        savePKL(out_bases, bases)
+    # Get the base composition of the genome
+    bases = getBaseComp(out_bases, fasta = fasta)
     
     sumKnownBases = bases['A'] + bases['a'] + bases['T'] + bases['t'] \
         + bases['C'] + bases['c'] + bases['G'] + bases['g']
@@ -427,7 +426,7 @@ def normalizeLabels(
         savePKL(out_feats, flatFeats)
     
     # Get the genome length for this fasta file
-    genLen = measureGenome(fasta)
+    genLen = getGenomeLength(fasta)
 
     # Now calculate the proportion of genome covered by each label - e.g.,
     #  Intergenic = genome - genes
