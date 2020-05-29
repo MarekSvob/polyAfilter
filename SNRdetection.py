@@ -418,8 +418,10 @@ def collectResult(result):
     # Go over the result dicts and add them to the respective global dicts
     for length, SNRs in lenToSNRs.items(): resSNRs[length].extend(SNRs)
     resSNRcounts.update(lenToSNRcounts)
-    for length, counts in lenToConcFeats: resConcFeats[length].update(counts)
-    for length, counts in lenToDiscFeats: resDiscFeats[length].update(counts)
+    for length, counts in lenToConcFeats.items():
+        resConcFeats[length].update(counts)
+    for length, counts in lenToDiscFeats.items():
+        resDiscFeats[length].update(counts)
     # Count this piece as processed
     processed += 1
     # Announce progress
