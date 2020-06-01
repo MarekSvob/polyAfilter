@@ -26,6 +26,7 @@ resDiscFeats = collections.defaultdict(collections.Counter)
 genomeLengths = collections.defaultdict(int)
 totalPieces = 0
 processed = 0
+timeStart = None
 
 # A dictionary of letters to avoid for splitting, given the base sought
 avoidSplits = {
@@ -228,7 +229,7 @@ def getPieces(base, fasta, cpus, cFR):
     return allPieces
 
     
-def findSNRs(base, piece, db_out, temp, mincont):
+def findSNRs(base, piece, db_out, temp, minFeatLen, minSNRlen):
     """Function to scan a given reference sequence (range) & find unique SNRs
     of given base type and length with given maximum number of mismatches
     allowed, such that the SNR contains mostly the primary bases and starts &
@@ -244,9 +245,12 @@ def findSNRs(base, piece, db_out, temp, mincont):
         Address of the master copy of the database.
     temp : (str)
         Address of temporary space to create working copies of the database.
-    mincont : (int)
-        The minimal length of the SNRs saved. (Note that all SNRs will be still
-        counted.)
+    minFeatLen : (int)
+        The minimal length of the SNRs to save its features; limited to save
+        processing time. (Note that all SNRs will be still counted.)
+    minSNRlen : (int)
+        The minimal length of the SNRs saved; limited to save storage space
+        needed. (Note that all SNRs will be still counted.)
 
     Returns
     -------
@@ -254,6 +258,10 @@ def findSNRs(base, piece, db_out, temp, mincont):
         { length : [ SNRs ] }
     lengthToSNRcounts : (counter)
         { length : SNRcount }
+    lenToConcFeats : (dict)
+        { length : { { feature } : count } } for concordant features.
+    lenToDiscFeats : (dict)
+        { length : { { feature } : count } } for discordant features.
     """
 
     # Define the complement base to be sought
@@ -299,74 +307,78 @@ def findSNRs(base, piece, db_out, temp, mincont):
                     length = last - first
                     # Count the SNR by its length
                     lenToSNRcounts.update({length : 1})
-                    # If the size is sufficient, save the SNR into the dict by
-                    #  its length with its attributes
-                    # Set the order of strands to look up features, always
-                    #  first concordant with the SNR, then discordant
-                    strds = ('+', '-') if b == base else ('-', '+')
-                    # Initialize the list [cFeats, cGenes, dFeats, dGenes]
-                    elems = []
-                    for strd in strds:
-                        # Initialize the set of features & genes
-                        feats = set()
-                        genes = collections.defaultdict(bool)
-                        # For each feature from the db spanned by the SNR
-                        for ft in db_conn.region(
-                            region = (s[0], s[1] + first, s[1] + last + 1),
-                            strand = strd
-                            ):
-                        # Note that the region() query is a 1-based (a,b)
-                        #  open interval, as documented here:
-                        #  https://github.com/daler/gffutils/issues/129
-                            # Save the feature type & add to the set
-                            feat = ft.featuretype
-                            feats.update({feat})
-                            # Look up gene info only if eventually added
-                            if length >= mincont:
-                                # If this is a transcript, make sure that the
-                                #  gene (a list of 1) it represents is in dict
-                                if feat in ('transcript', 'mRNA'):
-                                    # If gene_id is N/A, get 'gene' (DM genome)
-                                    [g] = ft.attributes['gene_id'] \
-                                        if 'gene_id' in ft.attributes.keys() \
-                                            else ft.attributes['gene']
-                                    genes[g]
-                                    # The gene is either added to the dict w/
-                                    #  'False' or if it already exists, its
-                                    #  bool is not over-written
-                                # If this is an exon, make sure that the gene
-                                #  it represents is in the dict with val 'True'
-                                elif feat == 'exon':
-                                    # If gene_id is N/A, get 'gene' (DM genome)
-                                    [g] = ft.attributes['gene_id'] \
-                                        if 'gene_id' in ft.attributes.keys() \
-                                            else ft.attributes['gene']
-                                    genes[g] = True                            
-                        # Save the elements
-                        elems.append(feats)
-                        elems.append(genes)
-                    # Count the feats in the appropriate counter
-                    lenToConcFeats[length].update({frozenset(elems[0]) : 1})
-                    lenToDiscFeats[length].update({frozenset(elems[2]) : 1})
-                    # If the SNR is large enough, add the SNR to the dict
-                    if length >= mincont:
-                        lenToSNRs[length].append(
-                            SNR(
-                                base,
-                                s[0],
-                                s[1] + first,
-                                s[1] + last,
-                                0,
-                                b == base,
-                                *elems
+                    # If the size is sufficient, look up the features
+                    if length >= minFeatLen:
+                        # Set the order of strands to look up features, always
+                        #  first concordant with the SNR, then discordant
+                        strds = ('+', '-') if b == base else ('-', '+')
+                        # Initialize the list [cFeats, cGenes, dFeats, dGenes]
+                        elems = []
+                        for strd in strds:
+                            # Initialize the set of features & genes
+                            feats = set()
+                            genes = collections.defaultdict(bool)
+                            # For each feature from the db spanned by the SNR
+                            for ft in db_conn.region(
+                                region = (s[0], s[1] + first, s[1] + last + 1),
+                                strand = strd
+                                ):
+                            # Note that the region() query is a 1-based (a,b)
+                            #  open interval, as documented here:
+                            #  https://github.com/daler/gffutils/issues/129
+                                # Save the feature type & add to the set
+                                feat = ft.featuretype
+                                feats.update({feat})
+                                # Look up gene info only if eventually added
+                                if length >= minSNRlen:
+                                    # If this is a transcript, make sure that
+                                    #  the gene (a list of 1) it represents is
+                                    #  added to the dict
+                                    if feat in ('transcript', 'mRNA'):
+                                        # If gene_id is N/A, get 'gene' (DM)
+                                        [g] = ft.attributes['gene_id'] if \
+                                            'gene_id' in ft.attributes.keys() \
+                                                else ft.attributes['gene']
+                                        genes[g]
+                                        # The gene is either added to the dict
+                                        #  w/ 'False' or if it already exists,
+                                        #  its bool is not over-written
+                                    # If this is an exon, make sure that the
+                                    #  gene it represents is in the dict with
+                                    #  value 'True'
+                                    elif feat == 'exon':
+                                        # If gene_id is N/A, get 'gene' (DM)
+                                        [g] = ft.attributes['gene_id'] if \
+                                            'gene_id' in ft.attributes.keys() \
+                                                else ft.attributes['gene']
+                                        genes[g] = True                            
+                            # Save the elements
+                            elems.append(feats)
+                            elems.append(genes)
+                        # Count the feats in the appropriate counter
+                        lenToConcFeats[length].update({frozenset(elems[0]):1})
+                        lenToDiscFeats[length].update({frozenset(elems[2]):1})
+                        # If the SNR is large enough, add the SNR to the dict
+                        if length >= minSNRlen:
+                            lenToSNRs[length].append(
+                                SNR(
+                                    base,
+                                    s[0],
+                                    s[1] + first,
+                                    s[1] + last,
+                                    0,
+                                    b == base,
+                                    *elems
+                                    )
                                 )
-                            )
-                    # For each SNR, break the for-loop so that if 'base' was
-                    #  found in the first position of the SNR, 'cBase' is not
-                    #  tested for in the same position again
+                        # For each SNR, break the for-loop so that if 'base'
+                        #  was found in the first position of the SNR, 'cBase'
+                        #  is not tested for in the same position again
                     break
             # Move over the frame for the new potential SNR
             first = last
+    # Close (and hence also delete) the temporary file
+    temp_f.close()
     
     return lenToSNRs, lenToSNRcounts, lenToConcFeats, lenToDiscFeats
 
@@ -378,14 +390,22 @@ def howLongSince(t_start):
     ----------
     t_start : (time.time())
         The timestamp since which to count.
+    show : (bool)
+        Indicator of whether the time elapsed should be shown.
 
     Returns
     -------
-    None.
+    hours : (int)
+        The number of full hours remaining.
+    minutes : (int)
+        The number of full minutes remaining.
+    seconds : (int)
+        The number of full seconds remaining.
     """
     
-    # Save how much has elapsed
+    # Save how much has elapsed (in seconds)
     t_diff = time.time() - t_start
+    
     print(
         "{}h:{}m:{}s elapsed".format(
             int(t_diff//(60*60)),
@@ -425,7 +445,22 @@ def collectResult(result):
     # Count this piece as processed
     processed += 1
     # Announce progress
-    print('Processed split: {:,}/{:,}'.format(processed, totalPieces))
+    t_since = time.time() - timeStart
+    t_left = t_since/processed * (totalPieces - processed)
+    print(
+        'Processed {:,} / {:,} ({:.2%}) splits in {}h:{}m:{}s. '\
+            'Time remaining: ~{}h:{}m:{}s'.format(
+                processed,
+                totalPieces,
+                processed / totalPieces,
+                int(t_since//(60*60)),
+                int((t_since%(60*60))//60),
+                int(t_since%60),
+                int(t_left//(60*60)),
+                int((t_left%(60*60))//60),
+                int(t_left%60),
+                )
+        )
     
     
 def saveSNRcsv(loc, lengthToSNRcounts):
@@ -530,7 +565,8 @@ def getSNRs(
         out_concf,
         out_discf,
         temp = '.',
-        mincont = 5,
+        minFeatLen = 1,
+        minSNRlen = 5,
         cpus = 70,
         maxtasks = None,
         cFR = (40, 5)
@@ -557,10 +593,12 @@ def getSNRs(
     temp : (str)
         The location to create temporary copies of the reference annotation
         database file for each parallel thread. Requires ample space.
-    mincont : (int)
-        The smallest number of bases in an SNR for it to be saved with
-        annotations (saves space & processing time). Note that all SNRs will
-        be still counted.
+    minFeatLen : (int)
+        The smallest number of bases for an SNR to have its features saved
+        (processing time). Note that all SNRs will be still counted.
+    minSNRlen : (int)
+        The smallest number of bases for an SNR to be saved (saves space). Note
+        that all SNRs will be still counted.
     cpus : (int), optional
         Number of processes to be used in parallel. The default is 70.
     maxtasks : (int), optional
@@ -573,12 +611,16 @@ def getSNRs(
     Returns
     -------
     resSNRs : (dict)
-        { SNRlength : [ SNR ] }
-    resSNRcounts : (dict)
-        { SNRlength : # of SNRs }
+        { length : [ SNRs ] }
+    resSNRcounts : (counter)
+        { length : SNRcount }
+    resConcFeats : (dict)
+        { length : { { feature } : count } } for concordant features.
+    resDiscFeats : (dict)
+        { length : { { feature } : count } } for discordant features.
     """
     
-    global resSNRs, resSNRcounts, resConcFeats, resDiscFeats
+    global timeStart, resSNRs, resSNRcounts, resConcFeats, resDiscFeats
     
     # If available, just load the previously saved data
     if os.path.isfile(out_snrs) and os.path.isfile(out_csv) \
@@ -605,6 +647,8 @@ def getSNRs(
         # Create the list of pieces to be processed in parallel
         allPieces = getPieces(base, fasta, cpus, cFR)
         print('Looking for SNRs across {} parallel processes...'.format(cpus))
+        # Start measuring time
+        timeStart = time.time()
         # Create a pool of workers with given the # of processes & max tasks
         #  for each one before it is restarted
         pool = Pool(processes = cpus, maxtasksperchild = maxtasks)
@@ -614,7 +658,7 @@ def getSNRs(
         for piece in allPieces:
             pool.apply_async(
                 func = findSNRs,
-                args = (base, piece, out_db, temp, mincont),
+                args = (base, piece, out_db, temp, minFeatLen, minSNRlen),
                 callback = collectResult
                 )
         # Close the pool

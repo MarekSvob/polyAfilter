@@ -72,7 +72,7 @@ def getBaseComp(out_bases, fasta = None, showGC = True):
     return bases
 
 
-def countsCheck(base, lengthToSNRcounts, out_bases, fasta = None):
+def countsCheck(base, lengthToSNRcounts, lenToFeats, out_bases, fasta = None):
     """Check whether the sum of the bases in question obtained from SNR counts
     and scanning the genome are congruent.
     Note: 'bases' has to be a (defaultdict) because if non-caps bases are not
@@ -108,9 +108,12 @@ def countsCheck(base, lengthToSNRcounts, out_bases, fasta = None):
             + bases[capsDict[compDict[base]][0]] \
                 + bases[capsDict[compDict[base]][1]]
     
-    if SNRbases == scanned:
+    featbases = sum([c*l for l,cs in lenToFeats.items() for c in cs.values()])
+    
+    if SNRbases == scanned == featbases:
         print(
-            'The total number of {}/{} bases ({:,}) checks out!'.format(
+            'The total number of {}/{} bases ({:,}) '\
+                'checks out across SNRs, feature sets, and genome!'.format(
                 base,
                 compDict[base],
                 SNRbases
@@ -118,13 +121,17 @@ def countsCheck(base, lengthToSNRcounts, out_bases, fasta = None):
             )
     else:
         print(
-            '{}/{} bases in SNRs: {:,}; from genome scanning {:,}'.format(
+            '{}/{} bases in SNRs: {:,}; from genome scanning {:,}; '\
+                'from feature counting: {:,}'.format(
                 base,
                 compDict[base],
                 SNRbases,
-                scanned
+                scanned,
+                featbases
                 )
             )
+    
+    
 
 
 def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
@@ -186,7 +193,7 @@ def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
     return df
 
 
-def SNRfeatureSets(lengthToSNRs):
+def SNRfeatureSets(lenToFeats):
     """Function that compiles a bool df of Features vs. FeatureSets.
     
     Parameters
@@ -197,16 +204,14 @@ def SNRfeatureSets(lengthToSNRs):
     Returns
     -------
     df : (dataframe)
-        A dataframe of features vs. featureSets.
+        A dataframe of features vs. featureSets, where the presence of the
+        former in the latter is expressed as a bool.
     """
     
     # Get the set of (frozen)sets of features represented among the SNRs
-    featureSets = set()
-    for key,vals in lengthToSNRs.items():
-        for SNR in vals:
-            featureSets |= {frozenset(SNR.feats)}
+    featureSets = list({s for c in lenToFeats.values() for s in c.keys()})
     # Flatten this set of features represented
-    features = {feat for featureSet in featureSets for feat in featureSet}
+    features = list({f for featureSet in featureSets for f in featureSet})
     
     # Create a { feature : [ bool ] } dict to describe representation of each
     #  feature in each featureset and use this to create a df
@@ -263,14 +268,14 @@ def getColNames(df, exclusivePairs = pairs, other = 'Exon'):
     return named_cols
 
 
-def SNRlabelProps(lengthToSNRs, exclusivePairs = pairs, other = 'Exon'):
+def SNRlabelProps(lenToFeats, exclusivePairs = pairs, other = 'Exon'):
     """Function that prepares a df of proportions of labeled SNRs for each
     length.    
 
     Parameters
     ----------
-    lengthToSNRs : (dict)
-        The dict of SNRs detected, sorted by length.
+    lenToFeats : (dict)
+        { length : { { feature } : count } }
     exclusivePairs : (list), optional
         A list of tuples with features and the respective labels assigned to
         mark their absence, such that [ (feature, label) ]. The default is
@@ -286,19 +291,21 @@ def SNRlabelProps(lengthToSNRs, exclusivePairs = pairs, other = 'Exon'):
     
     # Initiate the data matrix of zeros, SNRlength x label
     SNRlabels_data = np.zeros(
-        (max(lengthToSNRs.keys()) + 1, len(exclusivePairs) + 1),
+        (max(lenToFeats.keys()) + 1, len(exclusivePairs) + 1),
         dtype = int
         )
-    # For each SNR, add +1 for each label @ the appropriate length
-    for key, vals in lengthToSNRs.items():
-        for SNR in vals:
+    
+    # For each length, add up the feats corresponding to the respective labels
+    for length, featureCounts in lenToFeats.items():
+        for featureSet, count in featureCounts.items():
             for i in range(len(exclusivePairs)):
-                if exclusivePairs[i][0] not in SNR.feats:
+                if exclusivePairs[i][0] not in featureSet:
                     index = i
                     break
             else:
                 index = len(exclusivePairs)
-            SNRlabels_data[key, index] += 1
+            SNRlabels_data[length, index] += count
+
     # Derive the labels from the input
     colNames = [p[1] for p in exclusivePairs]
     colNames.append(other)
