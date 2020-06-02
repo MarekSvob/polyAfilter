@@ -9,6 +9,7 @@ Created on Sat May 16 18:07:19 2020
 import os
 import collections
 import gffutils
+import pysam
 import pandas as pd
 import numpy as np
 from Bio import SeqIO
@@ -321,15 +322,101 @@ def SNRlabelProps(lenToFeats, exclusivePairs = pairs, other = 'Exon'):
     df_p = pd.DataFrame(data = props, columns = df.columns, index = df.index)
     
     return df_p
+
+
+def getStrandedFeats(out_strandedFeats, out_db, featsOfInterest):
+    """Function to scan the GTF file and flatten the feats, preserving their
+    strandedness.    
+
+    Parameters
+    ----------
+    out_strandedFeats : (str)
+        Path to saved output.
+    out_db : (str)
+        Path to the database.
+    featsOfInterest : (iter)
+        An iterable (list or tuple) containing the features (str) of interest.
+
+    Returns
+    -------
+    flatStrandedFeats : (dict)
+        { featureType+/- : [ (ref, start, end) ] }
+
+    """
     
+    # If the flat feats have been created before, load, otherwise process
+    if os.path.isfile(out_strandedFeats):
+        flatStrandedFeats = loadPKL(out_strandedFeats)
+        return flatStrandedFeats
+    
+    # Connect the db
+    db_conn = gffutils.FeatureDB(out_db, keep_order = True)
+    
+    # Initiate the variables needed
+    strands = ('+', '-')
+    flatStrandedFeats = {}
+    
+    for featType in featsOfInterest:
+        # Go over each strand separately
+        for strd in strands:
+            print('Flattening {}{}s'.format(featType, strd))
+            featList = []
+            # Iterate through ALL features of this type, for each strand.
+            for feat in db_conn.all_features(
+                    featuretype = featType,
+                    strand = strd
+                    ):
+                # Save in a tuple: (ref, start, end)
+                nFeat = (feat.seqid, feat.start, feat.end)
+                # Go over the previous ones, check for overlap on the same
+                #  ref and save all the overlaps found in a list.
+                overlaps = []
+                for oFeat in featList:
+                    # If the ref is the same and (
+                    #  (the new Feat's beginning is within the old Feat)
+                    #  or (the new Feat's end is within the oldFeat)
+                    #  or (the newFeat spans the oldFeat)
+                    #  ), add old Feat to the overlaps list
+                    if nFeat[0] == oFeat[0] and (
+                        (nFeat[1] >= oFeat[1] and nFeat[1] <= oFeat[2]) \
+                        or (nFeat[2] >= oFeat[1] and nFeat[2] <= oFeat[2]) \
+                        or (nFeat[1] < oFeat[1] and nFeat[2] > oFeat[2])
+                        ):
+                        overlaps.append(oFeat)
+                #  If overlaps have been found, merge with the new one
+                if overlaps != []:
+                    # Initialize the start & end of the merged feature
+                    #  using the new Feat (not in the overlaps list)
+                    ref = nFeat[0]; start = nFeat[1]; end = nFeat[2]
+                    # Go over all the overlaps & update the start & end of
+                    #  the merged feature as necessary
+                    for ft in overlaps:
+                        if ft[1] < start:
+                            start = ft[1]
+                        if ft[2] > end:
+                            end = ft[2]
+                        # When done considering this feature, remove it
+                        #  from the master list
+                        featList.remove(ft)
+                    # When done, add the new merged feature to the list
+                    featList.append((ref, start, end))
+                # If no overlap has been found, add new as a new one
+                else:
+                    featList.append(nFeat)
+            # Save the feats in the master list to be saved
+            flatStrandedFeats['{}{}'.format(featType, strd)] = sorted(featList)
+    # Save the flattened feats to speed up the process in the future
+    savePKL(out_strandedFeats, flatStrandedFeats)
+    
+    return flatStrandedFeats
+
 
 def normalizeLabels(
         df,
-        out_feats,
+        out_strandedFeats,
         out_db = None,
         fasta = None,
-        exclusivePairs = pairs,
-        other = 'Exon'
+        exclusivePairs = pairs
         ):
     """Function to calculate what proportion of the genome is covered by each
     of the respective labels and subsequenly normalize the df by these
@@ -340,7 +427,7 @@ def normalizeLabels(
     ----------
     df : (dataframe)
         The df of measured SNR labels to be normalized.
-    out_feats : (str)
+    out_strandedFeats : (str)
         The location of the PKL file containing the dict of flattened feats.
     fasta : (str), optional
         The location of the FASTA reference sequence file. The default is None.
@@ -358,79 +445,24 @@ def normalizeLabels(
         Normalized dataframe
     """
     
+    # Extract the features of interest
+    featsOfInterest = [p[0] for p in exclusivePairs]
+    # Initiate the counter of total feature length
     regions = collections.defaultdict(int)
+    
     # First, if not done yet, flatten the relevant features, using the
     #  simplified peak-merging strategy from Biostats Final Project
     # Note that GFF features are 1-based, closed intervals
-    if os.path.isfile(out_feats):
-        flatFeats = loadPKL(out_feats)
-        for k,feats in flatFeats.items():
-            # 1-based, closed intervals [start, end]
-            regions[k[:-1]] += sum([feat[2] - feat[1] + 1 for feat in feats])
-    else:
-        # Connect the db
-        db_conn = gffutils.FeatureDB(out_db, keep_order = True)
-        
-        # Initiate the variables needed
-        strands = ('+', '-')
-        featsOfInterest = [p[0] for p in exclusivePairs]
-        flatFeats = {}
-        
-        for featType in featsOfInterest:
-            # Go over each strand separately
-            for strd in strands:
-                print('Going over {}{}s'.format(strd, featType))
-                featList = []
-                # Iterate through ALL features of this type, for each strand.
-                for feat in db_conn.all_features(
-                        featuretype = featType,
-                        strand = strd
-                        ):
-                    # Save in a tuple: (ref, start, end)
-                    nFeat = (feat.seqid, feat.start, feat.end)
-                    # Go over the previous ones, check for overlap on the same
-                    #  ref and save all the overlaps found in a list.
-                    overlaps = []
-                    for oFeat in featList:
-                        # If the ref is the same and (
-                        #  (the new Feat's beginning is within the old Feat)
-                        #  or (the new Feat's end is within the oldFeat)
-                        #  or (the newFeat spans the oldFeat)
-                        #  ), add old Feat to the overlaps list
-                        if nFeat[0] == oFeat[0] and (
-                            (nFeat[1] >= oFeat[1] and nFeat[1] <= oFeat[2]) \
-                            or (nFeat[2] >= oFeat[1] and nFeat[2] <= oFeat[2]) \
-                            or (nFeat[1] < oFeat[1] and nFeat[2] > oFeat[2])
-                            ):
-                            overlaps.append(oFeat)
-                    #  If overlaps have been found, merge with the new one
-                    if overlaps != []:
-                        # Initialize the start & end of the merged feature
-                        #  using the new Feat (not in the overlaps list)
-                        ref = nFeat[0]; start = nFeat[1]; end = nFeat[2]
-                        # Go over all the overlaps & update the start & end of
-                        #  the merged feature as necessary
-                        for ft in overlaps:
-                            if ft[1] < start:
-                                start = ft[1]
-                            if ft[2] > end:
-                                end = ft[2]
-                            # When done considering this feature, remove it
-                            #  from the master list
-                            featList.remove(ft)
-                        # When done, add the new merged feature to the list
-                        featList.append((ref, start, end))
-                    # If no overlap has been found, add new as a new one
-                    else:
-                        featList.append(nFeat)
-                # Once all features have been flattened, add up their lengths
-                for feat in featList:
-                    # 1-based, closed intervals [start, end]
-                    regions[featType] += (feat[2] - feat[1] + 1)
-                # Save the feats in the master list to be saved
-                flatFeats['{}{}'.format(featType, strd)] = sorted(featList)
-        # Save the flattened feats to speed up the process in the future
-        savePKL(out_feats, flatFeats)
+    flatStrandedFeats = getStrandedFeats(
+        out_strandedFeats,
+        out_db,
+        featsOfInterest
+        )
+
+    # Add up the cumulative feature length, summing up both strands
+    for k,feats in flatStrandedFeats.items():
+        # 1-based, closed intervals [start, end]
+        regions[k[:-1]] += sum([feat[2] - feat[1] + 1 for feat in feats])
     
     # Get the genome length for this fasta file
     genLen = getGenomeLength(fasta)
@@ -451,7 +483,7 @@ def normalizeLabels(
             (regions[exclusivePairs[i-1][0]] - regions[exclusivePairs[i][0]]) \
                 / (genLen*2)
             ])))
-    # Add the last one, independent of other labels
+    # Add the last one, which is independent of other labels
     labelProps = np.concatenate(
         (labelProps, np.array([regions[exclusivePairs[-1][0]] / (genLen*2)]))
         )
@@ -464,3 +496,212 @@ def normalizeLabels(
         )
     
     return df_norm
+
+
+def filterReads(
+        bamfile,
+        filt_bamfile,
+        flatStrandedFeats,
+        featType = 'exon',
+        concordant = True
+        ):
+    """Function to create a bam file from a subset of reads that are aligned
+    to a specific feature type on the same or opposite strand.
+
+    Parameters
+    ----------
+    bamfile : (str)
+        The path to the original bamfile.
+    filt_bamfile : (str)
+        The path to the filtered bamfile.
+    flatStrandedFeats : (dict)
+        { featureType+/- : [ (ref, start, end) ] } where [start, end] is a
+        1-based closed interval.
+    featType : TYPE, optional
+        Get only reads overlapping this type of feature. The default is 'exon'.
+    concordant : (bool), optional
+        Indicates whether the mapping reads should be on the same (True) or
+        opposite (False) strand wrt/ the feature. The default is True.
+
+    Returns
+    -------
+    None.
+    """
+    
+    # If the file already exists, announce and do not do anything
+    if os.path.isfile(filt_bamfile):
+        print('The filtered file already exists.')
+        return    
+    
+    # Connect to the bam file
+    bam = pysam.AlignmentFile(bamfile, 'rb')
+    
+    # Initiate the varuables needed
+    # This needs to start off as a set to avoid double-adding reads aligned to
+    #  two features of the same type
+    filt_reads = set()
+    current_ref = ''
+    strds = ('+', '-')
+    
+    # Get only reads on the same strand as the feature in question
+    for strd in strds:
+        # Cycle over the feats under the appropriate key
+        for feat in sorted(flatStrandedFeats['{}{}'.format(featType, strd)]):
+            if current_ref != feat[0]:
+                current_ref = feat[0]
+                print(
+                    'Processing {} strand of reference {}'.format(
+                        strd,
+                        current_ref
+                        )
+                    )
+            for read in bam.fetch(
+                    contig = feat[0],
+                    start = feat[1] - 1,
+                    end = feat[2]
+                    ):
+                # Make sure the read is on the correct strand before adding:
+                if concordant == (read.is_reverse == (strd == '-')):
+                    filt_reads.add(read)
+    
+    # Transform the set into a list for sorting
+    filt_reads_list = list(filt_reads)
+    # Reads must be sorted for indexing
+    filt_reads_list.sort(
+        key = lambda x: (x.reference_id, x.reference_start, x.reference_length)
+        )
+    
+    # Create the bamfile to add the reads
+    filt_bam = pysam.AlignmentFile(filt_bamfile, 'wb', template = bam)
+    # Add the reads in order
+    for read in filt_reads_list:
+        filt_bam.write(read)
+    # Close the files
+    filt_bam.close()
+    bam.close()
+    
+
+def getCoveragePerSNR(
+        lenToSNRs,
+        bamfile,
+        SNRlengths,
+        window = 2000,
+        concordant = True,
+        SNRfeat = 'transcript'
+        ):
+    """Obtain average RNA-seq coverage in the vicinity of SNRs pf given length.
+    
+    Parameters
+    ----------
+    lengthToSNRs : (dict)
+        { length : [SNR] }
+    bamfile : (str)
+        Path to the (pre-filtered) bamfile.
+    SNRlengths : (iter)
+        Any iterable (list, tuple, etc.) containing the SNR lengths of interest.
+    window : (int), optional
+        Total size of the window around the SNR covered. The default is 2000.
+    concordant : (bool), optional
+        Switch between concordant & discordant coverage. The default is True.
+    SNRfeat : (str), optional
+        The feature by which SNRs are selected. The default is 'transcript'.
+
+    Returns
+    -------
+    normCoverage : (np.array)
+        An array describing normalized per-base coverage of the window
+        surrounding the SNR.
+    """
+
+    # Attach a pre-filtered bam file
+    bam = pysam.AlignmentFile(bamfile, 'rb')
+    
+    # Initialize the array for the window coverage & SNR count
+    coverage = np.zeros((window), 'L')
+    SNRcount = 0
+    # Go over the SNRs 
+    for length in sorted(lenToSNRs.keys(), reverse = True):
+        if length in SNRlengths:
+            print('Going over SNR{}s...'.format(length))
+            # Note that SNRs are 0-based
+            for SNR in lenToSNRs[length]:
+                # Only consider SNRs in transcripts, as those are the
+                #  sources of internal (concordant or discordant) priming
+                if (concordant and SNRfeat in SNR.concFeats) \
+                    or (not concordant and SNRfeat in SNR.discFeats):
+                    # Count the SNR
+                    SNRcount += 1
+                    # Get the mid point of the SNR wrt/ the reference
+                    mid = (SNR.end + SNR.start) // 2
+                    # Get the coverage summed over A/T/C/G; count only
+                    #  reads on the same (conc) or opposite (disc) strand
+                    refCoverage = np.sum(
+                        bam.count_coverage(
+                            contig = SNR.record,
+                            start = int(mid - window/2),
+                            stop = int(mid + window/2),
+                            quality_threshold = 0,
+                            read_callback = lambda r: concordant == \
+                                (r.is_reverse != SNR.strand)
+                            ),
+                        axis = 0
+                        )
+                    # Flip the coverage to be in the 5'->3' orientation
+                    #  wrt/ the transcript direction
+                    if SNR.strand == concordant:
+                        coverage += refCoverage
+                    else:
+                        coverage += refCoverage[::-1]
+    bam.close()
+    
+    # Normalize the coverage by the number of SNRs
+    normCoverage = coverage / SNRcount
+    
+    return normCoverage
+
+
+def getExpectedCoverage(bamfile, flatStrandedFeats, SNRfeat = 'transcript'):
+    """Get the per-base expected RNA-seq coverage across the given featuretype.
+    
+    Parameters
+    ----------
+    bamfile : (str)
+        Path to the (pre-filtered) bamfile.
+    flatStrandedFeats : (dict)
+        { featureType : [ (ref, start, end) ] }
+    SNRfeat : (str), optional
+        The featureType from which SNRs are drawn. The default is 'transcript'.
+
+    Returns
+    -------
+    expected : (float)
+        The expected per-base coverage from the RNA-seq data.
+    """
+    
+    # Attach a pre-filtered bam file
+    bam = pysam.AlignmentFile(bamfile, 'rb')
+    
+    # First, get the total (absolute) coverage by the reads on both strands in
+    #  the bam file in question
+    totalCoverage = 0
+    for ref in bam.references:
+        print('Getting total coverage for reference {}'.format(ref))
+        totalCoverage += np.sum(
+            bam.count_coverage(ref, quality_threshold = 0),
+            dtype = 'int'
+            )
+    bam.close()
+    
+    # Get the total length of the feat that the SNRs come from
+    totalLength = 0
+    strds = ('+', '-')
+    for strd in strds:
+        print('Scanning {}{}s for total length...'.format(SNRfeat, strd))
+        for feat in flatStrandedFeats['{}{}'.format(SNRfeat, strd)]:
+            # Note that pysam is 0-based; my vars are 1-based (like the gtf)
+            totalLength += feat[2] - feat[1] + 1
+    
+    # Normalize the coverage by #SNRs, total coverage, and total length
+    expected = totalCoverage/totalLength
+    
+    return expected
