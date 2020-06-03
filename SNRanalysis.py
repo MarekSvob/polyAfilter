@@ -633,21 +633,45 @@ def getCoveragePerSNR(
                     SNRcount += 1
                     # Get the mid point of the SNR wrt/ the reference
                     mid = (SNR.end + SNR.start) // 2
+                    start = int(mid - window/2)
+                    stop = int(mid + window/2)
+                    # Include correctins for the start & end if the window
+                    #  falls out of the reference size range
+                    if start < 0:
+                        corrStart = 0
+                    else:
+                        corrStart = start
+                    refLen = bam.get_reference_length(SNR.record)
+                    if stop > refLen:
+                        corrStop = refLen
+                    else:
+                        corrStop = stop
                     # Get the coverage summed over A/T/C/G; count only
                     #  reads on the same (conc) or opposite (disc) strand
                     refCoverage = np.sum(
                         bam.count_coverage(
                             contig = SNR.record,
-                            start = int(mid - window/2),
-                            stop = int(mid + window/2),
+                            start = corrStart,
+                            stop = corrStop,
                             quality_threshold = 0,
                             read_callback = lambda r: concordant == \
                                 (r.is_reverse != SNR.strand)
                             ),
                         axis = 0
                         )
-                    # Flip the coverage to be in the 5'->3' orientation
-                    #  wrt/ the transcript direction
+                    # If the window was out of the ref range, fill in the rest
+                    if corrStart == 0:
+                        refCoverage = np.append(
+                            np.zeros((0 - start), 'L'),
+                            refCoverage
+                            )
+                    if corrStop != stop:
+                        refCoverage = np.append(
+                            refCoverage,
+                            np.zeros((stop - corrStop), 'L')
+                            )
+                    # If needed, flip the coverage to be in the 5'->3'
+                    #  orientation wrt/ the transcript direction
                     if SNR.strand == concordant:
                         coverage += refCoverage
                     else:
@@ -655,7 +679,7 @@ def getCoveragePerSNR(
     bam.close()
     
     # Normalize the coverage by the number of SNRs
-    normCoverage = coverage / SNRcount
+    normCoverage = coverage / SNRcount if SNRcount != 0 else coverage
     
     return normCoverage
 
