@@ -10,6 +10,7 @@ import os
 import collections
 import gffutils
 import pysam
+import itertools
 import pandas as pd
 import numpy as np
 from Bio import SeqIO
@@ -583,14 +584,16 @@ def filterReads(
 
 def getCoveragePerSNR(
         lenToSNRs,
+        out_db,
+        out_strandedFeats,
+        out_SNRCov,
         bamfile,
-        SNRlengths,
-        expCov,
-        out_file,
+        SNRlengths = itertools.count(),
         window = 2000,
         concordant = True,
         SNRfeat = 'transcript',
-        log10Filter = 4
+        log10Filter = 4,
+        exclusivePairs = pairs
         ):
     """Obtain RNA-seq coverage in the vicinity of SNRs of given length.
     
@@ -598,23 +601,31 @@ def getCoveragePerSNR(
     ----------
     lengthToSNRs : (dict)
         { length : [SNR] }
+    out_db : (str)
+        Path to the file with the database.
+    out_strandedFeats : (str)
+        Path to the file with stranded feats.
+    out_SNRCov : (str)
+        Path to the file with an output from this function.
     bamfile : (str)
         Path to the (pre-filtered) bamfile.
-    SNRlengths : (iter)
+    SNRlengths : (iter), optional
         An iterable (list, tuple, etc.) containing the SNR lengths of interest.
-    expCov : (float)
-        The expected per-base coverage by corcondant or discordant reads.
-    out_file : (str)
-        Path to the output file
+        The default is itertools.count().
     window : (int), optional
         Total size of the window around the SNR covered. The default is 2000.
     concordant : (bool), optional
         Switch between concordant & discordant coverage. The default is True.
     SNRfeat : (str), optional
         The feature by which SNRs are selected. The default is 'transcript'.
-    log10Filter : (int)
+    log10Filter : (int), optional
         If coverage at any base of an SNR exceeds this power of 10 multiple of
-        the expected coverage, the SNR is discarded as an outlier.
+        the expected coverage, the SNR is discarded as an outlier. The default
+        is 4.
+    exclusivePairs : (list), optional
+        A list of tuples with features and the respective labels assigned to
+        mark their absence, such that [ (feature, label) ]. The default is
+        [('gene','Intergenic'),('transcript','Regulatory'),('exon','Intron')].
 
     Returns
     -------
@@ -622,9 +633,21 @@ def getCoveragePerSNR(
         { SNRlength : ( SNRcount, np.array ) } 
     """
     
-    if os.path.isfile(out_file):
-        coverageByLen = loadPKL(out_file)
+    # If the file already exists, simply load
+    if os.path.isfile(out_SNRCov):
+        coverageByLen = loadPKL(out_SNRCov)
         return coverageByLen
+    
+    # Otherwise get feats of interest, if needed for getStrandedFeats
+    featsOfInterest = [p[0] for p in exclusivePairs]
+    # In most cases, this should just load a file
+    flatStrandedFeats = getStrandedFeats(
+        out_strandedFeats,
+        out_db,
+        featsOfInterest
+        )
+    # Get the expected coverage
+    expCov = getExpectedCoverage(bamfile, flatStrandedFeats, SNRfeat = SNRfeat)
     
     # Attach a pre-filtered bam file
     bam = pysam.AlignmentFile(bamfile, 'rb')
@@ -701,10 +724,10 @@ def getCoveragePerSNR(
                     # Count the added SNR
                     SNRcount += 1
             if SNRcount != 0:
-                coverageByLen[length] = (SNRcount, coverage)
+                coverageByLen[length] = (SNRcount, coverage / expCov)
    
     bam.close()
-    savePKL(out_file, coverageByLen)
+    savePKL(out_SNRCov, coverageByLen)
     print('Filtered out {:.2%} outliers.'.format(filteredOut/totalCount))
     
     return coverageByLen
