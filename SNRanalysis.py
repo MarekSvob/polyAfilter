@@ -589,7 +589,7 @@ def getCoveragePerSNR(
         concordant = True,
         SNRfeat = 'transcript'
         ):
-    """Obtain average RNA-seq coverage in the vicinity of SNRs pf given length.
+    """Obtain RNA-seq coverage in the vicinity of SNRs of given length.
     
     Parameters
     ----------
@@ -608,20 +608,21 @@ def getCoveragePerSNR(
 
     Returns
     -------
-    normCoverage : (np.array)
-        An array describing normalized per-base coverage of the window
-        surrounding the SNR.
+    coverageByLen : (dict)
+        { SNRlength : ( SNRcount, np.array ) } 
     """
 
     # Attach a pre-filtered bam file
     bam = pysam.AlignmentFile(bamfile, 'rb')
     
-    # Initialize the array for the window coverage & SNR count
-    coverage = np.zeros((window), 'L')
-    SNRcount = 0
-    # Go over the SNRs 
+    # Initialize the dict to collect all the data
+    coverageByLen = {}
+    # Go over the SNRs by length, starting with the longest
     for length in sorted(lenToSNRs.keys(), reverse = True):
         if length in SNRlengths:
+            # For each length, initialize the count & array for the window coverage
+            SNRcount = 0
+            coverage = np.zeros((window), 'L')
             print('Going over SNR{}s...'.format(length))
             # Note that SNRs are 0-based
             for SNR in lenToSNRs[length]:
@@ -676,12 +677,12 @@ def getCoveragePerSNR(
                         coverage += refCoverage
                     else:
                         coverage += refCoverage[::-1]
+            if SNRcount != 0:
+                coverageByLen[length] = (SNRcount, coverage)
+   
     bam.close()
     
-    # Normalize the coverage by the number of SNRs
-    normCoverage = coverage / SNRcount if SNRcount != 0 else coverage
-    
-    return normCoverage
+    return coverageByLen
 
 
 def getExpectedCoverage(bamfile, flatStrandedFeats, SNRfeat = 'transcript'):
