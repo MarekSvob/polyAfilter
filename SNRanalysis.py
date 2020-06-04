@@ -585,9 +585,12 @@ def getCoveragePerSNR(
         lenToSNRs,
         bamfile,
         SNRlengths,
+        expCov,
+        out_file,
         window = 2000,
         concordant = True,
-        SNRfeat = 'transcript'
+        SNRfeat = 'transcript',
+        log10Filter = 4
         ):
     """Obtain RNA-seq coverage in the vicinity of SNRs of given length.
     
@@ -598,29 +601,42 @@ def getCoveragePerSNR(
     bamfile : (str)
         Path to the (pre-filtered) bamfile.
     SNRlengths : (iter)
-        Any iterable (list, tuple, etc.) containing the SNR lengths of interest.
+        An iterable (list, tuple, etc.) containing the SNR lengths of interest.
+    expCov : (float)
+        The expected per-base coverage by corcondant or discordant reads.
+    out_file : (str)
+        Path to the output file
     window : (int), optional
         Total size of the window around the SNR covered. The default is 2000.
     concordant : (bool), optional
         Switch between concordant & discordant coverage. The default is True.
     SNRfeat : (str), optional
         The feature by which SNRs are selected. The default is 'transcript'.
+    log10Filter : (int)
+        If coverage at any base of an SNR exceeds this power of 10 multiple of
+        the expected coverage, the SNR is discarded as an outlier.
 
     Returns
     -------
     coverageByLen : (dict)
         { SNRlength : ( SNRcount, np.array ) } 
     """
-
+    
+    if os.path.isfile(out_file):
+        coverageByLen = loadPKL(out_file)
+        return coverageByLen
+    
     # Attach a pre-filtered bam file
     bam = pysam.AlignmentFile(bamfile, 'rb')
     
     # Initialize the dict to collect all the data
     coverageByLen = {}
+    totalCount = 0
+    filteredOut = 0
     # Go over the SNRs by length, starting with the longest
     for length in sorted(lenToSNRs.keys(), reverse = True):
         if length in SNRlengths:
-            # For each length, initialize the count & array for the window coverage
+            # For each length, initialize the count & array for window coverage
             SNRcount = 0
             coverage = np.zeros((window), 'L')
             print('Going over SNR{}s...'.format(length))
@@ -630,8 +646,6 @@ def getCoveragePerSNR(
                 #  sources of internal (concordant or discordant) priming
                 if (concordant and SNRfeat in SNR.concFeats) \
                     or (not concordant and SNRfeat in SNR.discFeats):
-                    # Count the SNR
-                    SNRcount += 1
                     # Get the mid point of the SNR wrt/ the reference
                     mid = (SNR.end + SNR.start) // 2
                     start = int(mid - window/2)
@@ -660,6 +674,13 @@ def getCoveragePerSNR(
                             ),
                         axis = 0
                         )
+                    totalCount += 1
+                    # If coverage at any base around this SNR exceeds the
+                    #  threshold multiple of the expected coverage,
+                    #  discard the SNR's coverage as an outlier
+                    if max(refCoverage) / expCov > 10**log10Filter:
+                        filteredOut += 1
+                        continue
                     # If the window was out of the ref range, fill in the rest
                     if corrStart == 0:
                         refCoverage = np.append(
@@ -677,10 +698,14 @@ def getCoveragePerSNR(
                         coverage += refCoverage
                     else:
                         coverage += refCoverage[::-1]
+                    # Count the added SNR
+                    SNRcount += 1
             if SNRcount != 0:
                 coverageByLen[length] = (SNRcount, coverage)
    
     bam.close()
+    savePKL(out_file, coverageByLen)
+    print('Filtered out {:.2%} outliers.'.format(filteredOut/totalCount))
     
     return coverageByLen
 
