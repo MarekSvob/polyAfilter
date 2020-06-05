@@ -629,46 +629,47 @@ def getSNRs(
         resSNRcounts = loadSNRcsv(out_csv)
         resConcFeats = loadPKL(out_concf)
         resDiscFeats = loadPKL(out_discf)
+        return resSNRs, resSNRcounts, resConcFeats, resDiscFeats
+    
     # Otherwise create it by processing
-    else:
-        # Create a database from the gff if it does not exist yet
-        print('Checking for a database...')
-        if not os.path.isfile(out_db):
-            print('None had been created - creating a new database...')
-            gffutils.create_db(
-                gff,
-                dbfn = out_db,
-                force = True,
-                merge_strategy = 'create_unique',
-                id_spec = ['ID', 'Name'],
-                verbose = True
-                )
-        print('The database is ready.')
-        # Create the list of pieces to be processed in parallel
-        allPieces = getPieces(base, fasta, cpus, cFR)
-        print('Looking for SNRs across {} parallel processes...'.format(cpus))
-        # Start measuring time
-        timeStart = time.time()
-        # Create a pool of workers with given the # of processes & max tasks
-        #  for each one before it is restarted
-        pool = Pool(processes = cpus, maxtasksperchild = maxtasks)
-        # Queue up the processes in the order of the list. The results are sent
-        #  to the collectResult() function and from there in turn to the global
-        #  result variables.
-        for piece in allPieces:
-            pool.apply_async(
-                func = findSNRs,
-                args = (base, piece, out_db, temp, minFeatLen, minSNRlen),
-                callback = collectResult
-                )
-        # Close the pool
-        pool.close()
-        # Join the processes
-        pool.join()
-        # Save the newly processed data
-        savePKL(out_snrs, resSNRs)
-        saveSNRcsv(out_csv, resSNRcounts)
-        savePKL(out_concf, resConcFeats)
-        savePKL(out_discf, resDiscFeats)
+    # Create a database from the gff if it does not exist yet
+    print('Checking for a database...')
+    if not os.path.isfile(out_db):
+        print('None had been created - creating a new database...')
+        gffutils.create_db(
+            gff,
+            dbfn = out_db,
+            force = True,
+            merge_strategy = 'create_unique',
+            id_spec = ['ID', 'Name'],
+            verbose = True
+            )
+    print('The database is ready.')
+    # Create the list of pieces to be processed in parallel
+    allPieces = getPieces(base, fasta, cpus, cFR)
+    print('Looking for SNRs across {} parallel processes...'.format(cpus))
+    # Start measuring time
+    timeStart = time.time()
+    # Create a pool of workers with given the # of processes & max tasks
+    #  for each one before it is restarted
+    pool = Pool(processes = cpus, maxtasksperchild = maxtasks)
+    # Queue up the processes in the order of the list. The results are sent
+    #  to the collectResult() function and from there in turn to the global
+    #  result variables.
+    for piece in allPieces:
+        pool.apply_async(
+            func = findSNRs,
+            args = (base, piece, out_db, temp, minFeatLen, minSNRlen),
+            callback = collectResult
+            )
+    # Close the pool
+    pool.close()
+    # Join the processes
+    pool.join()
+    # Save the newly processed data
+    savePKL(out_snrs, resSNRs)
+    saveSNRcsv(out_csv, resSNRcounts)
+    savePKL(out_concf, resConcFeats)
+    savePKL(out_discf, resDiscFeats)
     
     return resSNRs, resSNRcounts, resConcFeats, resDiscFeats

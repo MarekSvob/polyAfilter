@@ -10,7 +10,6 @@ import os
 import collections
 import gffutils
 import pysam
-import itertools
 import pandas as pd
 import numpy as np
 from Bio import SeqIO
@@ -47,29 +46,29 @@ def getBaseComp(out_bases, fasta = None, showGC = True):
     # Load the bases dictionary, if available
     if os.path.isfile(out_bases):
         bases = loadPKL(out_bases)
+        return bases
     # Otherwise, scan the genome to create it
-    else:
-        bases = collections.defaultdict(int)
-    
-        print('Scanning the genome for base composition...')
-        # Make sure that the fasta file is open only temporarily
-        with open(fasta, 'r') as genome:
-            # Go over each base in each record in the genome and count each
-            for record in SeqIO.parse(genome, "fasta"):
-                for base in record.seq:
-                    bases[base] += 1
-        # Save the bases
-        savePKL(out_bases, bases)
-        # Optionally, show the GC% content of this genome
-        if showGC:
-            gc = bases['C'] + bases['c'] + bases['G'] + bases['g']
-            sumKnownBases = bases['A'] + bases['a'] + bases['T'] + bases['t'] \
-                + bases['C'] + bases['c'] + bases['G'] + bases['g']
-            print(
-                'Scanning finished, G/C content: {:.2%}'.format(
-                    round(gc / sumKnownBases, 2)
-                    )
+    bases = collections.defaultdict(int)
+
+    print('Scanning the genome for base composition...')
+    # Make sure that the fasta file is open only temporarily
+    with open(fasta, 'r') as genome:
+        # Go over each base in each record in the genome and count each
+        for record in SeqIO.parse(genome, "fasta"):
+            for base in record.seq:
+                bases[base] += 1
+    # Save the bases
+    savePKL(out_bases, bases)
+    # Optionally, show the GC% content of this genome
+    if showGC:
+        gc = bases['C'] + bases['c'] + bases['G'] + bases['g']
+        sumKnownBases = bases['A'] + bases['a'] + bases['T'] + bases['t'] \
+            + bases['C'] + bases['c'] + bases['G'] + bases['g']
+        print(
+            'Scanning finished, G/C content: {:.2%}'.format(
+                round(gc / sumKnownBases, 2)
                 )
+            )
     
     return bases
 
@@ -500,29 +499,36 @@ def normalizeLabels(
 
 
 def filterReads(
+        out_db,
+        out_strandedFeats,
         bamfile,
         filt_bamfile,
-        flatStrandedFeats,
         featType = 'exon',
-        concordant = True
+        concordant = True,
+        exclusivePairs = pairs
         ):
     """Function to create a bam file from a subset of reads that are aligned
     to a specific feature type on the same or opposite strand.
 
     Parameters
     ----------
+    out_db : (str)
+        Path to the file with the database.
+    out_strandedFeats : (str)
+        Path to the file with stranded feats.
     bamfile : (str)
         The path to the original bamfile.
     filt_bamfile : (str)
         The path to the filtered bamfile.
-    flatStrandedFeats : (dict)
-        { featureType+/- : [ (ref, start, end) ] } where [start, end] is a
-        1-based closed interval.
     featType : TYPE, optional
         Get only reads overlapping this type of feature. The default is 'exon'.
     concordant : (bool), optional
         Indicates whether the mapping reads should be on the same (True) or
         opposite (False) strand wrt/ the feature. The default is True.
+    exclusivePairs : (list), optional
+        A list of tuples with features and the respective labels assigned to
+        mark their absence, such that [ (feature, label) ]. The default is
+        [('gene','Intergenic'),('transcript','Regulatory'),('exon','Intron')].
 
     Returns
     -------
@@ -532,7 +538,20 @@ def filterReads(
     # If the file already exists, announce and do not do anything
     if os.path.isfile(filt_bamfile):
         print('The filtered file already exists.')
+        if not os.path.isfile('{}.bai'.format(filt_bamfile)):
+            print('!!! Before continuing, index it in terminal using command '\
+                  '"samtools index {}"'.format(filt_bamfile))
         return    
+
+    # Otherwise get feats of interest, if needed for getStrandedFeats
+    featsOfInterest = [p[0] for p in exclusivePairs]
+    
+    # This will usually just load the file
+    flatStrandedFeats = getStrandedFeats(
+        out_strandedFeats,
+        out_db,
+        featsOfInterest
+        )
     
     # Connect to the bam file
     bam = pysam.AlignmentFile(bamfile, 'rb')
@@ -581,14 +600,18 @@ def filterReads(
     filt_bam.close()
     bam.close()
     
+    print('A filtered bam file has been created.')
+    print('!!! Before continuing, index it in terminal using command '\
+          '"samtools index {}"'.format(filt_bamfile))
+    
 
 def getCoveragePerSNR(
         lenToSNRs,
         out_db,
         out_strandedFeats,
         out_SNRCov,
-        bamfile,
-        SNRlengths = itertools.count(),
+        exonic_bamfile,
+        SNRlengths = range(200),
         window = 2000,
         concordant = True,
         SNRfeat = 'transcript',
@@ -607,7 +630,7 @@ def getCoveragePerSNR(
         Path to the file with stranded feats.
     out_SNRCov : (str)
         Path to the file with an output from this function.
-    bamfile : (str)
+    exonic_bamfile : (str)
         Path to the (pre-filtered) bamfile.
     SNRlengths : (iter), optional
         An iterable (list, tuple, etc.) containing the SNR lengths of interest.
@@ -647,10 +670,14 @@ def getCoveragePerSNR(
         featsOfInterest
         )
     # Get the expected coverage
-    expCov = getExpectedCoverage(bamfile, flatStrandedFeats, SNRfeat = SNRfeat)
+    expCov = getExpectedCoverage(
+        exonic_bamfile,
+        flatStrandedFeats,
+        SNRfeat = SNRfeat
+        )
     
     # Attach a pre-filtered bam file
-    bam = pysam.AlignmentFile(bamfile, 'rb')
+    bam = pysam.AlignmentFile(exonic_bamfile, 'rb')
     
     # Initialize the dict to collect all the data
     coverageByLen = {}
