@@ -670,6 +670,7 @@ def getExpectedCoverage(
 
 def getCovPerSNR(
         out_SNRCov,
+        out_SNROutl,
         lenToSNRs,
         out_db,
         out_strandedFeats,
@@ -678,14 +679,16 @@ def getCovPerSNR(
         window = 2000,
         concordant = True,
         SNRfeat = 'transcript',
-        log10Filter = 4
+        log10Filter = 3
         ):
     """Obtain RNA-seq coverage in the vicinity of SNRs of given length.
     
     Parameters
     ----------
     out_SNRCov : (str)
-        Path to the file with an output from this function.
+        Path to the file with per-SNR coverage by length.
+    out_SNROutl : (str)
+        Path to the file with per-SNR coverage by length for each outlier.
     lengthToSNRs : (dict)
         { length : [SNR] }
     out_db : (str)
@@ -711,13 +714,16 @@ def getCovPerSNR(
     Returns
     -------
     coverageByLen : (dict)
-        { SNRlength : ( SNRcount, np.array ) } 
+        { SNRlength : ( SNRcount, np.array ) }
+    outlierPeaks : (dict)
+        { SNRlength : [ ( SNR, np.array ) ] }
     """
     
     # If the file already exists, simply load
-    if os.path.isfile(out_SNRCov):
+    if os.path.isfile(out_SNRCov) and os.path.isfile(out_SNROutl):
         coverageByLen = loadPKL(out_SNRCov)
-        return coverageByLen
+        outlierPeaks = loadPKL(out_SNROutl)
+        return coverageByLen, outlierPeaks
 
     # Get the expected coverage
     expCov = getExpectedCoverage(
@@ -733,6 +739,7 @@ def getCovPerSNR(
     
     # Initialize the dict to collect all the data
     coverageByLen = {}
+    outlierPeaks = collections.defaultdict(list)
     totalCount = 0
     filteredOut = 0
     # Go over the SNRs by length, starting with the longest
@@ -771,18 +778,12 @@ def getCovPerSNR(
                             start = corrStart,
                             stop = corrStop,
                             quality_threshold = 0,
-                            read_callback = lambda r: concordant == \
-                                (r.is_reverse != SNR.strand)
+                            read_callback = lambda r: \
+                                r.is_reverse != SNR.strand
                             ),
                         axis = 0
                         )
                     totalCount += 1
-                    # If coverage at any base around this SNR exceeds the
-                    #  threshold multiple of the expected coverage,
-                    #  discard the SNR's coverage as an outlier
-                    if max(refCoverage) / expCov > 10**log10Filter:
-                        filteredOut += 1
-                        continue
                     # If the window was out of the ref range, fill in the rest
                     if corrStart == 0:
                         refCoverage = np.append(
@@ -795,11 +796,18 @@ def getCovPerSNR(
                             np.zeros((stop - corrStop), 'L')
                             )
                     # If needed, flip the coverage to be in the 5'->3'
-                    #  orientation wrt/ the transcript direction
-                    if SNR.strand == concordant:
-                        coverage += refCoverage
-                    else:
-                        coverage += refCoverage[::-1]
+                    #  orientation wrt/ the transcript feature direction
+                    if SNR.strand != concordant:
+                        refCoverage = refCoverage[::-1]
+                    # If coverage at any base around this SNR exceeds the
+                    #  threshold multiple of the expected coverage, put the
+                    #  SNR's coverage aside into outliers
+                    if max(refCoverage) / expCov > 10**log10Filter:
+                        filteredOut += 1
+                        outlierPeaks[length].append((SNR, refCoverage/expCov))
+                        continue
+                    # Add the SNR
+                    coverage += refCoverage
                     # Count the added SNR
                     SNRcount += 1
             if SNRcount != 0:
@@ -807,8 +815,9 @@ def getCovPerSNR(
    
     bam.close()
     savePKL(out_SNRCov, coverageByLen)
+    savePKL(out_SNROutl, outlierPeaks)
     print('Filtered out {:.2%} outliers.'.format(filteredOut/totalCount))
     
-    return coverageByLen
+    return coverageByLen, outlierPeaks
 
     
