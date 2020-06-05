@@ -32,6 +32,8 @@ def getBaseComp(out_bases, fasta = None, showGC = True):
 
     Parameters
     ----------
+    out_bases : (str)
+        File path of the pre-calculated bases file.
     fasta : (str), optional
         File path of the fasta reference file. The default is None.
     showGC : (bool), optional
@@ -85,6 +87,8 @@ def countsCheck(base, lengthToSNRcounts, lenToFeats, out_bases, fasta = None):
         The base in question.
     lengthToSNRcounts : (dict)
         { SNRlength : SNRcount }
+    lenToFeats : (dict)
+        { SNRlength : { { feature } : count } }
     out_bases : (str)
         File path of the pre-calculated bases file.
     fasta : (str), optional
@@ -131,8 +135,6 @@ def countsCheck(base, lengthToSNRcounts, lenToFeats, out_bases, fasta = None):
                 featbases
                 )
             )
-    
-    
 
 
 def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
@@ -347,7 +349,9 @@ def getStrandedFeats(out_strandedFeats, out_db, featsOfInterest):
     # If the flat feats have been created before, load, otherwise process
     if os.path.isfile(out_strandedFeats):
         flatStrandedFeats = loadPKL(out_strandedFeats)
-        return flatStrandedFeats
+        if all('{}{}'.format(f, strd) in flatStrandedFeats.keys() \
+               for f in featsOfInterest for strd in ('+', '-')):
+            return flatStrandedFeats
     
     # Connect the db
     db_conn = gffutils.FeatureDB(out_db, keep_order = True)
@@ -429,11 +433,11 @@ def normalizeLabels(
         The df of measured SNR labels to be normalized.
     out_strandedFeats : (str)
         The location of the PKL file containing the dict of flattened feats.
-    fasta : (str), optional
-        The location of the FASTA reference sequence file. The default is None.
     out_db : (str), optional
         The location of the reference annotation database file. The default is
         None.
+    fasta : (str), optional
+        The location of the FASTA reference sequence file. The default is None.
     exclusivePairs : (list), optional
         A list of tuples with features and the respective labels assigned to
         mark their absence, such that [ (feature, label) ]. The default is
@@ -499,36 +503,31 @@ def normalizeLabels(
 
 
 def filterReads(
+        filt_bamfile,
         out_db,
         out_strandedFeats,
         bamfile,
-        filt_bamfile,
         featType = 'exon',
-        concordant = True,
-        exclusivePairs = pairs
+        concordant = True
         ):
     """Function to create a bam file from a subset of reads that are aligned
     to a specific feature type on the same or opposite strand.
 
     Parameters
     ----------
+    filt_bamfile : (str)
+        The path to the filtered bamfile.
     out_db : (str)
         Path to the file with the database.
     out_strandedFeats : (str)
         Path to the file with stranded feats.
     bamfile : (str)
         The path to the original bamfile.
-    filt_bamfile : (str)
-        The path to the filtered bamfile.
     featType : TYPE, optional
         Get only reads overlapping this type of feature. The default is 'exon'.
     concordant : (bool), optional
         Indicates whether the mapping reads should be on the same (True) or
         opposite (False) strand wrt/ the feature. The default is True.
-    exclusivePairs : (list), optional
-        A list of tuples with features and the respective labels assigned to
-        mark their absence, such that [ (feature, label) ]. The default is
-        [('gene','Intergenic'),('transcript','Regulatory'),('exon','Intron')].
 
     Returns
     -------
@@ -542,15 +541,12 @@ def filterReads(
             print('!!! Before continuing, index it in terminal using command '\
                   '"samtools index {}"'.format(filt_bamfile))
         return    
-
-    # Otherwise get feats of interest, if needed for getStrandedFeats
-    featsOfInterest = [p[0] for p in exclusivePairs]
     
     # This will usually just load the file
     flatStrandedFeats = getStrandedFeats(
         out_strandedFeats,
         out_db,
-        featsOfInterest
+        (featType, )
         )
     
     # Connect to the bam file
@@ -563,7 +559,8 @@ def filterReads(
     current_ref = ''
     strds = ('+', '-')
     
-    # Get only reads on the same strand as the feature in question
+    # Get only reads on the same/other (depends if concordant or not) strand
+    #  as the feature in question
     for strd in strds:
         # Cycle over the feats under the appropriate key
         for feat in sorted(flatStrandedFeats['{}{}'.format(featType, strd)]):
@@ -575,6 +572,8 @@ def filterReads(
                         current_ref
                         )
                     )
+            # Gffutils features have 1-based [x,y] closed intervals,
+            #  while pysam fetch has 0-based [x,y) half-open intervals
             for read in bam.fetch(
                     contig = feat[0],
                     start = feat[1] - 1,
@@ -603,33 +602,96 @@ def filterReads(
     print('A filtered bam file has been created.')
     print('!!! Before continuing, index it in terminal using command '\
           '"samtools index {}"'.format(filt_bamfile))
-    
 
-def getCoveragePerSNR(
+
+def getExpectedCoverage(
+        out_db,
+        out_strandedFeats,
+        bamfile,
+        concordant = True,
+        SNRfeat = 'transcript'
+        ):
+    """Get the per-base expected RNA-seq coverage across the given featuretype.
+    
+    Parameters
+    ----------
+    out_db : (str)
+        Path to the file with the database.
+    out_strandedFeats : (str)
+        Path to the file with stranded feats.
+    bamfile : (str)
+        Path to the (pre-filtered) bamfile.
+    concordant : (bool)
+        Indicator of which saved value to retrieve.
+    SNRfeat : (str), optional
+        The featureType from which SNRs are drawn. The default is 'transcript'.
+
+    Returns
+    -------
+    expected : (float)
+        The expected per-base coverage from the RNA-seq data.
+    """
+    
+    # In most cases, this should just load a file
+    flatStrandedFeats = getStrandedFeats(
+        out_strandedFeats,
+        out_db,
+        (SNRfeat, )
+        )
+    
+    # Attach a pre-filtered bam file
+    bam = pysam.AlignmentFile(bamfile, 'rb')
+    
+    # First, get the total (absolute) coverage by the reads on both strands in
+    #  the bam file in question
+    totalCoverage = 0
+    for ref in bam.references:
+        print('Getting total coverage for reference {}'.format(ref))
+        totalCoverage += np.sum(
+            bam.count_coverage(ref, quality_threshold = 0),
+            dtype = 'int'
+            )
+    bam.close()
+    
+    # Get the total length of the feat that the SNRs come from
+    totalLength = 0
+    strds = ('+', '-')
+    for strd in strds:
+        print('Scanning {}{}s for total length...'.format(SNRfeat, strd))
+        for feat in flatStrandedFeats['{}{}'.format(SNRfeat, strd)]:
+            # Note that pysam is 0-based; my vars are 1-based (like the gtf)
+            totalLength += feat[2] - feat[1] + 1
+    
+    # Normalize the coverage by #SNRs, total coverage, and total length
+    expected = totalCoverage/totalLength
+    
+    return expected
+
+
+def getCovPerSNR(
+        out_SNRCov,
         lenToSNRs,
         out_db,
         out_strandedFeats,
-        out_SNRCov,
         exonic_bamfile,
         SNRlengths = range(200),
         window = 2000,
         concordant = True,
         SNRfeat = 'transcript',
-        log10Filter = 4,
-        exclusivePairs = pairs
+        log10Filter = 4
         ):
     """Obtain RNA-seq coverage in the vicinity of SNRs of given length.
     
     Parameters
     ----------
+    out_SNRCov : (str)
+        Path to the file with an output from this function.
     lengthToSNRs : (dict)
         { length : [SNR] }
     out_db : (str)
         Path to the file with the database.
     out_strandedFeats : (str)
         Path to the file with stranded feats.
-    out_SNRCov : (str)
-        Path to the file with an output from this function.
     exonic_bamfile : (str)
         Path to the (pre-filtered) bamfile.
     SNRlengths : (iter), optional
@@ -645,10 +707,6 @@ def getCoveragePerSNR(
         If coverage at any base of an SNR exceeds this power of 10 multiple of
         the expected coverage, the SNR is discarded as an outlier. The default
         is 4.
-    exclusivePairs : (list), optional
-        A list of tuples with features and the respective labels assigned to
-        mark their absence, such that [ (feature, label) ]. The default is
-        [('gene','Intergenic'),('transcript','Regulatory'),('exon','Intron')].
 
     Returns
     -------
@@ -660,19 +718,13 @@ def getCoveragePerSNR(
     if os.path.isfile(out_SNRCov):
         coverageByLen = loadPKL(out_SNRCov)
         return coverageByLen
-    
-    # Otherwise get feats of interest, if needed for getStrandedFeats
-    featsOfInterest = [p[0] for p in exclusivePairs]
-    # In most cases, this should just load a file
-    flatStrandedFeats = getStrandedFeats(
-        out_strandedFeats,
-        out_db,
-        featsOfInterest
-        )
+
     # Get the expected coverage
     expCov = getExpectedCoverage(
+        out_db,
+        out_strandedFeats,
         exonic_bamfile,
-        flatStrandedFeats,
+        concordant = concordant,
         SNRfeat = SNRfeat
         )
     
@@ -759,49 +811,4 @@ def getCoveragePerSNR(
     
     return coverageByLen
 
-
-def getExpectedCoverage(bamfile, flatStrandedFeats, SNRfeat = 'transcript'):
-    """Get the per-base expected RNA-seq coverage across the given featuretype.
     
-    Parameters
-    ----------
-    bamfile : (str)
-        Path to the (pre-filtered) bamfile.
-    flatStrandedFeats : (dict)
-        { featureType : [ (ref, start, end) ] }
-    SNRfeat : (str), optional
-        The featureType from which SNRs are drawn. The default is 'transcript'.
-
-    Returns
-    -------
-    expected : (float)
-        The expected per-base coverage from the RNA-seq data.
-    """
-    
-    # Attach a pre-filtered bam file
-    bam = pysam.AlignmentFile(bamfile, 'rb')
-    
-    # First, get the total (absolute) coverage by the reads on both strands in
-    #  the bam file in question
-    totalCoverage = 0
-    for ref in bam.references:
-        print('Getting total coverage for reference {}'.format(ref))
-        totalCoverage += np.sum(
-            bam.count_coverage(ref, quality_threshold = 0),
-            dtype = 'int'
-            )
-    bam.close()
-    
-    # Get the total length of the feat that the SNRs come from
-    totalLength = 0
-    strds = ('+', '-')
-    for strd in strds:
-        print('Scanning {}{}s for total length...'.format(SNRfeat, strd))
-        for feat in flatStrandedFeats['{}{}'.format(SNRfeat, strd)]:
-            # Note that pysam is 0-based; my vars are 1-based (like the gtf)
-            totalLength += feat[2] - feat[1] + 1
-    
-    # Normalize the coverage by #SNRs, total coverage, and total length
-    expected = totalCoverage/totalLength
-    
-    return expected

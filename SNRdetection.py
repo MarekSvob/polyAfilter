@@ -390,17 +390,10 @@ def howLongSince(t_start):
     ----------
     t_start : (time.time())
         The timestamp since which to count.
-    show : (bool)
-        Indicator of whether the time elapsed should be shown.
 
     Returns
     -------
-    hours : (int)
-        The number of full hours remaining.
-    minutes : (int)
-        The number of full minutes remaining.
-    seconds : (int)
-        The number of full seconds remaining.
+    None.
     """
     
     # Save how much has elapsed (in seconds)
@@ -423,7 +416,8 @@ def collectResult(result):
     ----------
     result : (dict)
         Result yielded by multiprocessing.pool.map_async(); in this case, it
-        is a tuple such that: (SNRdict, countDict)
+        is a tuple such that:
+        (lenToSNRs, lenToSNRcounts, lenToConcFeats, lenToDiscFeats)
 
     Returns
     -------
@@ -470,8 +464,6 @@ def saveSNRcsv(loc, lengthToSNRcounts):
     ----------
     loc : (str)
         Location of where the csv should be saved.
-    base : (str)
-        The DNA base that has been sought.
     lengthToSNRcounts : (dict)
         { length : SNRcount }
 
@@ -493,9 +485,9 @@ def savePKL(loc, var):
     Parameters
     ----------
     loc : (str)
-        Location of where the pkl should be saved.
+        Location of the pkl file where the variable should be saved.
     var : (any)
-        Any file
+        Any variable
 
     Returns
     -------
@@ -590,6 +582,10 @@ def getSNRs(
     out_csv : (str)
         The location of the previously created SNRs count pkl. If none exists
         at that location, one will be created.
+    out_concf : (str)
+        The location of the saved concordant feats dictionary.
+    out_discf : (str)
+        The location of the saved discordant feats dictionary.
     temp : (str)
         The location to create temporary copies of the reference annotation
         database file for each parallel thread. Requires ample space.
