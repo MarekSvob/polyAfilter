@@ -637,9 +637,13 @@ def getSNRs(
             dbfn = out_db,
             force = True,
             merge_strategy = 'create_unique',
-            id_spec = ['ID', 'Name'],
+            #id_spec = ['ID', 'Name'],
             verbose = True
             )
+        # Note that not specifying id_spec makes the db creation much slower
+        #  (up to 5 hrs instead of ~20 min) but enables proper functioning of
+        #  gffutils.FeatureDB.children(), as discussed here:
+        #  https://github.com/daler/gffutils/issues/158
     print('The database is ready.')
     # Create the list of pieces to be processed in parallel
     allPieces = getPieces(base, fasta, cpus, cFR)
