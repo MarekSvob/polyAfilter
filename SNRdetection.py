@@ -621,10 +621,10 @@ def getSNRs(
     # If available, just load the previously saved data
     if os.path.isfile(out_snrs) and os.path.isfile(out_csv) \
         and os.path.isfile(out_concf) and os.path.isfile(out_discf):
-        resSNRs = loadPKL(out_snrs)
         resSNRcounts = loadSNRcsv(out_csv)
         resConcFeats = loadPKL(out_concf)
         resDiscFeats = loadPKL(out_discf)
+        resSNRs = loadPKL(out_snrs)
         return resSNRs, resSNRcounts, resConcFeats, resDiscFeats
     
     # Otherwise create it by processing

@@ -72,18 +72,17 @@ def filterReads(
     #  two features of the same type
     filt_reads = set()
     current_ref = ''
-    strds = ('+', '-')
     
     # Get only reads on the same/other strand (depends if concordant or not)
     #  as the feature in question
-    for strd in strds:
+    for strd in (True, False):
         # Cycle over the feats under the appropriate key
         for feat in sorted(flatStrandedFeats[strd][featType]):
             if current_ref != feat[0]:
                 current_ref = feat[0]
                 print(
                     'Processing {} strand of reference {}'.format(
-                        strd,
+                        '+' if strd else '-',
                         current_ref
                         )
                     )
@@ -95,7 +94,7 @@ def filterReads(
                     end = feat[2]
                     ):
                 # Make sure the read is on the correct strand before adding:
-                if concordant == (read.is_reverse == (strd == '-')):
+                if concordant == (read.is_reverse != strd):
                     filt_reads.add(read)
     
     # Transform the set into a list for sorting
@@ -181,9 +180,13 @@ def getExpectedCoverage(
     
     # Get the total length of the feat that the SNRs come from
     totalLength = 0
-    strds = ('+', '-')
-    for strd in strds:
-        print('Scanning {}{}s for total length...'.format(strd, baselineFeat))
+    for strd in (True, False):
+        print(
+            'Scanning {}{}s for total length...'.format(
+                '+' if strd else '-',
+                baselineFeat
+                )
+            )
         for feat in flatStrandedFeats[strd][baselineFeat]:
             # Note that pysam is 0-based; my vars are 1-based (like the gtf)
             totalLength += feat[2] - feat[1] + 1
@@ -428,10 +431,12 @@ def getCovPerTran(
     transCount = 0
     coverage = np.zeros((window), 'L')
     
-    for strd in ('+', '-'):
-        print('Going over coverage of {}transcripts'.format(strd))
+    for strd in (True, False):
+        print(
+            'Going over coverage of {}transcripts'.format('+' if strd else '-')
+            )
         for feat in flatStrandedFeats[strd]['transcript']:
-            if strd == '+':
+            if strd:
                 mid = feat[2]
             else:
                 mid = feat[1]
@@ -455,7 +460,7 @@ def getCovPerTran(
                     start = corrStart,
                     stop = corrStop,
                     quality_threshold = 0,
-                    read_callback = lambda r: r.is_reverse == (strd == '-')
+                    read_callback = lambda r: r.is_reverse != strd
                     ),
                 axis = 0
                 )
@@ -473,7 +478,7 @@ def getCovPerTran(
                     )
             # If needed, flip the coverage to be in the 5'->3'
             #  orientation wrt/ the transcript feature direction
-            if strd == '-':
+            if not strd:
                 refCoverage = refCoverage[::-1]
             # Add the SNR
             coverage += refCoverage

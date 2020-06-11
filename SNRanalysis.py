@@ -414,11 +414,10 @@ def getStrandedFeats(out_strandedFeats, out_db, featsOfInterest):
     db_conn = gffutils.FeatureDB(out_db, keep_order = True)
     
     # Initiate the variables needed
-    strands = (True , False)
     flatStrandedFeats = {}
     
     # Go over each strand separately
-    for strd in strands:
+    for strd in (True, False):
         flatFeats = {}
         for featType in featsOfInterest:
             print('Flattening {}{}s'.format('+' if strd else '-', featType))
@@ -470,11 +469,10 @@ def getStrandedFeatsByGene(out_featsByGene, out_db, featType = 'transcript'):
     db_conn = gffutils.FeatureDB(out_db, keep_order = True)
     
     # Initiate the variables needed
-    strands = (True , False)
     flatStrandedFeatsByGene = {}
     
     # Go over each strand separately
-    for strd in strands:
+    for strd in (True, False):
         featsByGene = collections.defaultdict(list)
         print(
             'Flattening {}{}s by gene'.format('+' if strd else '-',featType)
