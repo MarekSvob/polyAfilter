@@ -634,8 +634,7 @@ def getNonCanCovGenes(
                     quality_threshold = 0,
                     read_callback = lambda r:
                         r.is_reverse == (geneFeat.strand == '-')
-                    ),
-                axis = 0
+                    )
                 )
         # Add this as an interesting gene only if the unaccounted-for coverage
         #  (not in endings) exceeds the threshold
