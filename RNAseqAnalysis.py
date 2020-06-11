@@ -485,6 +485,9 @@ def getCovPerTran(
     # Normalize the coverage only once at the end
     normCov = coverage / (transCount * expCov)
     
+    bam.close()
+    savePKL(out_TranCov, normCov)
+    
     return normCov
 
 
@@ -626,7 +629,7 @@ def getNonCanCovGenes(
                     
         # Once done going over the transcripts, add up the coverage of endings
         for (covS, covE) in endings:
-            endCoverage += sum(
+            endCoverage += np.sum(
                 bam.count_coverage(
                     contig = geneFeat.seqid,
                     start = covS,
