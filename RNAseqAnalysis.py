@@ -17,6 +17,26 @@ expCovConc = 0
 expCovDisc = 0
 
 
+class NoncGene:
+    """An object that stores information about a gene identified to be
+    non-canonically covered.
+    """    
+    
+    def __init__(self, geneF, cov, prop, trans, SNRs):
+        self.geneFeat = geneF   # gffutils.Feature, gff db gene in quesion
+        self.cov = cov          # np.array, the bp-wise coverage of this gene
+        self.prop = prop        # float, the non-canonical proportion of cov
+        self.trans = trans      # list, [ gffutils.Feature ] of overlapping Ts
+        self.SNRs = SNRs        # dict, { SNRlength : [ SNR ] }
+        
+    def __str__(self):
+        # Displays the base, number of mismatches, and location
+        return '{} NoncGene @ {} strand'.format(
+            self.geneFeat.ID,
+            self.geneFeat.strand
+            )
+
+
 def filterReads(
         filt_bamfile,
         out_db,
@@ -525,16 +545,9 @@ def getNonCanCovGenes(
 
     Returns
     -------
-    nonCanCovGenes : (dict)
-        Genes mapping to tuples of total coverage, transcriptToExons, and
-        lengthToSNR, such that
-        { geneID :
-            (
-                np.array,
-                { ( geneID, start, end ) : [ ( start, end ) ] } ,
-                { SNRlength : [ SNR ] }
-                )
-            }
+    nonCanCovGenes : (list)
+        Genes found to have a significant proportion of coverage outside of
+        the canonically expected area.
     """
     # For each gene, what proportion of (concordant) coverage is outside of
     #  the last 250 bp of all exon-wise transcripts?
@@ -544,7 +557,7 @@ def getNonCanCovGenes(
         nonCanCovGenes = loadPKL(out_NonCanCovGenes)
         return nonCanCovGenes
     
-    nonCanCovGenes = {}
+    nonCanCovGenes = []
     
     # Sort SNRs by gene
     geneLenToSNRs = getGeneLenToSNRs(lenToSNRs, concordant = True)
@@ -558,7 +571,7 @@ def getNonCanCovGenes(
             continue
         # Get the total bp-wise coverage for the gene
         geneFeat = db[geneID]
-        geneBPcoverage = np.sum(
+        geneBPcov = np.sum(
             bam.count_coverage(
                 contig = geneFeat.seqid,
                 start = geneFeat.start,
@@ -570,10 +583,10 @@ def getNonCanCovGenes(
             axis = 0
             )
         # If there's no gene coverage, skip
-        geneCoverage = sum(geneBPcoverage)
+        geneCoverage = sum(geneBPcov)
         if geneCoverage == 0:
             continue
-        transToExs = {}
+        transcripts = []
         endings = []
         endCoverage = 0
         # Go over ALL transcripts overlapping this gene (even from other genes)
@@ -614,9 +627,8 @@ def getNonCanCovGenes(
             #  not beyond the gene end
             if (strd and covStart <= geneFeat.end) \
                 or (not strd and covStart >= geneFeat.start):
-                    # Extract the gene this transcript belongs to and save
-                    [g] = trans.attributes['gene_id']
-                    transToExs[(g, trans.start, trans.end)] = exons
+                    # Save this transcript feature in the list
+                    transcripts.append(trans)
                     # Add an ending whose coverage is to be assessed
                     if strd:
                         endings.append(
@@ -641,9 +653,13 @@ def getNonCanCovGenes(
                 )
         # Add this as an interesting gene only if the unaccounted-for coverage
         #  (not in endings) exceeds the threshold
-        if (geneCoverage - endCoverage) / geneCoverage >= covThreshold:
-            nonCanCovGenes[geneID] = (geneBPcoverage, transToExs, lenToSNRs)
-        
+        prop = (geneCoverage - endCoverage) / geneCoverage
+        [biotype] = geneFeat.attributes['gene_biotype']
+        if prop >= covThreshold:
+            nonCanCovGenes.append(
+                NoncGene(geneFeat, geneBPcov, prop, transcripts, lenToSNRs)
+                )
+
     bam.close()
     savePKL(out_NonCanCovGenes, nonCanCovGenes)    
     
