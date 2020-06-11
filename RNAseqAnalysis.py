@@ -414,7 +414,7 @@ def getCovPerTran(
         out_strandedFeats,
         exonic_bamfile,
         concordant = True,
-        SNRfeat = 'transcript'
+        baselineFeat = 'transcript'
         )
     
     # In most cases, this should just load a file
