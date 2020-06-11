@@ -263,7 +263,7 @@ def getCovPerSNR(
         out_strandedFeats,
         exonic_bamfile,
         concordant = concordant,
-        SNRfeat = SNRfeat
+        baselineFeat = SNRfeat
         )
     
     # Attach a pre-filtered bam file
