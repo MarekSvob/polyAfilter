@@ -7,9 +7,10 @@ Created on Sat Jun  6 17:00:37 2020
 """
 import os
 import pysam
+import gffutils
 import collections
 import numpy as np
-from SNRanalysis import getStrandedFeats, getStrandedFeatsByGene
+from SNRanalysis import getStrandedFeats, getGeneLenToSNRs
 from SNRdetection import savePKL, loadPKL
 
 expCovConc = 0
@@ -200,7 +201,7 @@ def getExpectedCoverage(
 
 
 def getCovPerSNR(
-        out_SNRCovGeneLen,
+        out_SNRCovLen,
         out_SNROutl,
         lenToSNRs,
         out_db,
@@ -218,9 +219,6 @@ def getCovPerSNR(
     ----------
     out_SNRCovLen : (str)
         Path to the file with per-SNR coverage by length.
-    out_SNRCovGene : (str)
-        Path to the file with per-SNR coverage by gene. Note that only non-0
-        peaks are added.
     out_SNROutl : (str)
         Path to the file with per-SNR coverage by length for each outlier.
     lengthToSNRs : (dict)
@@ -247,17 +245,17 @@ def getCovPerSNR(
 
     Returns
     -------
-    covByGeneLen : (dict)
-        { gene : { length : ( SNRcount, SNRzeroCount, np.array ) } }
+    covByLen : (dict)
+        { length : ( SNRcount, SNRzeroCount, np.array ) }
     outlierPeaks : (dict)
         { SNRlength : [ ( SNR, np.array ) ] }
     """
     
     # If the file already exists, simply load
-    if os.path.isfile(out_SNRCovGeneLen) and os.path.isfile(out_SNROutl):
-            covByGeneLen = loadPKL(out_SNRCovGeneLen)
+    if os.path.isfile(out_SNRCovLen) and os.path.isfile(out_SNROutl):
+            covByLen = loadPKL(out_SNRCovLen)
             outlierPeaks = loadPKL(out_SNROutl)
-            return covByGeneLen, outlierPeaks
+            return covByLen, outlierPeaks
 
     # Get the expected coverage
     expCov = getExpectedCoverage(
@@ -272,7 +270,7 @@ def getCovPerSNR(
     bam = pysam.AlignmentFile(exonic_bamfile, 'rb')
     
     # Initialize the dict to collect all the data
-    covByGeneLen = collections.defaultdict(collections.defaultdict(tuple))
+    covByLen = {}
     outlierPeaks = collections.defaultdict(list)
     totalCount = 0
     filteredOut = 0
@@ -282,11 +280,14 @@ def getCovPerSNR(
         if length in SNRlengths:
             # For each length, initialize the count & array for window coverage
             print(
-                'Going over {} SNR{}s...'.format(
+                'Going over {} coverage of SNR{}s...'.format(
                     'concordant' if concordant else 'discordant',
                     length
                     )
                 )
+            SNRcount = 0
+            zeros = 0
+            coverage = np.zeros((window), 'L')
             # Note that SNRs are 0-based
             for SNR in lenToSNRs[length]:
                 # Only consider SNRs in transcripts, as those are the
@@ -322,25 +323,12 @@ def getCovPerSNR(
                         axis = 0
                         )
                     totalCount += 1
-                    # Extract the appropriate genes
-                    if concordant:
-                        genesOfInterest = SNR.concGenes
-                    else:
-                        genesOfInterest = SNR.discGenes
                     # If this is zero coverage, only add the counts
                     if sum(refCov) == 0:
                         zeroCovs += 1
-                        # A custom defaultdict workaround
-                        for gene in genesOfInterest:
-                            if covByGeneLen[gene][length] == ():
-                                covByGeneLen[gene][length] = (
-                                    1,
-                                    1,
-                                    np.zeros((window), 'L')
-                                    )
-                            else:
-                                covByGeneLen[gene][length][0] += 1
-                                covByGeneLen[gene][length][1] += 1
+                        zeros += 1
+                        SNRcount += 1
+                    # Otherwise add the coverage found
                     else:                    
                         # If the window was out of ref range, fill in the rest
                         if corrStart != start:
@@ -356,58 +344,300 @@ def getCovPerSNR(
                         # Normalize and if needed, flip the coverage to be in
                         #  the 5'->3' orientation wrt/ the transcript feature
                         if SNR.strand == concordant:
-                            refCov = refCov / expCov
+                            refCov = refCov
                         else:
-                            refCov = refCov[::-1] / expCov
+                            refCov = refCov[::-1]
                         # If coverage at any base around this SNR exceeds the
                         #  threshold multiple of the expected coverage, put
                         #  the SNR's coverage aside into outliers
                         if max(refCov) / expCov > 10**log10Filter:
                             filteredOut += 1
-                            outlierPeaks[length].append((SNR, refCov))
-                        # Otherwise add the coverage by gene & length
+                            outlierPeaks[length].append((SNR, refCov / expCov))
+                        # Otherwise add the coverage by length
                         else:
-                            for gene in genesOfInterest:
-                                if covByGeneLen[gene][length] == ():
-                                    covByGeneLen[gene][length] = (1, 0, refCov)
-                                else:
-                                    covByGeneLen[gene][length][0] += 1
-                                    covByGeneLen[gene][length][2] += refCov
+                            coverage += refCov
+                            SNRcount += 1
+            # At the end of each length normalize & add everything to dict
+            covByLen[length] = (SNRcount, zeros, coverage / expCov)
     bam.close()
-    savePKL(out_SNRCovGeneLen, covByGeneLen)
+    savePKL(out_SNRCovLen, covByLen)
     savePKL(out_SNROutl, outlierPeaks)
     print(
-        'Filtered out {:.2%} outliers. {:.2%} SNRs had nfo coverage.'.format(
+        'Filtered out {:.2%} outliers and {:.2%} SNRs had no coverage.'.format(
             filteredOut / totalCount,
             zeroCovs / totalCount
             )
         )
     
-    return covByGeneLen, outlierPeaks
+    return covByLen, outlierPeaks
 
 
-def getCovPerTran(out_TranCov, concordant = True):
-    
+def getCovPerTran(
+        out_TranCov,
+        out_db,
+        out_strandedFeats,
+        exonic_bamfile,
+        window = 2000
+        ):
+    """Function that aggregates all per-transcript coverage.
+
+    Parameters
+    ----------
+    out_TranCov : (str)
+        Path to the output of this function.
+    out_db : (str)
+        Path to the file with the database.
+    out_strandedFeats : (str)
+        Path to the file with stranded feats.
+    exonic_bamfile : (str)
+        Path to the (pre-filtered) bamfile.
+    window : (int), optional
+        Total size of the window around the SNR covered. The default is 2000.
+
+    Returns
+    -------
+    normCov : (np.array)
+        Aggregate normalized coverage around the 3' end of transcripts.
+    """
     
     # If the file already exists, simply load
-    if os.path.isfile(out_SNRCovGeneLen) and os.path.isfile(out_SNROutl):
-            covByGene = loadPKL(out_SNRCovGeneLen)
-            return covByGene
+    if os.path.isfile(out_TranCov):
+        normCov = loadPKL(out_TranCov)
+        return normCov
     
     # Get the expected coverage
     expCov = getExpectedCoverage(
         out_db,
         out_strandedFeats,
         exonic_bamfile,
-        concordant = concordant,
+        concordant = True,
         SNRfeat = 'transcript'
         )
     
-    # If done before, this will only return the feats
-    featsByGene = getStrandedFeatsByGene(
-        out_featsByGene,
+    # In most cases, this should just load a file
+    flatStrandedFeats = getStrandedFeats(
+        out_strandedFeats,
         out_db,
-        featType = 'transcript'
+        ('transcript', )
         )
     
-    return
+    # Attach a pre-filtered bam file
+    bam = pysam.AlignmentFile(exonic_bamfile, 'rb')
+    
+    # Initiate the variables needed
+    transCount = 0
+    coverage = np.zeros((window), 'L')
+    
+    for strd in ('+', '-'):
+        print('Going over coverage of {}transcripts'.format(strd))
+        for feat in flatStrandedFeats[strd]['transcript']:
+            if strd == '+':
+                mid = feat[2]
+            else:
+                mid = feat[1]
+            start = int(mid - window / 2)
+            stop = int(mid + window / 2)
+            # Include correctins for the start & end if the window
+            #  falls out of the reference size range
+            if start < 0:
+                corrStart = 0
+            else:
+                corrStart = start
+            refLen = bam.get_reference_length(feat[0])
+            if stop > refLen:
+                corrStop = refLen
+            else:
+                corrStop = stop
+            # Get the coverage summed over A/T/C/G; count only concordant reads
+            refCoverage = np.sum(
+                bam.count_coverage(
+                    contig = feat[0],
+                    start = corrStart,
+                    stop = corrStop,
+                    quality_threshold = 0,
+                    read_callback = lambda r: r.is_reverse == (strd == '-')
+                    ),
+                axis = 0
+                )
+            transCount += 1
+            # If the window was out of the ref range, fill in the rest
+            if corrStart == 0:
+                refCoverage = np.append(
+                    np.zeros((0 - start), 'L'),
+                    refCoverage
+                    )
+            if corrStop != stop:
+                refCoverage = np.append(
+                    refCoverage,
+                    np.zeros((stop - corrStop), 'L')
+                    )
+            # If needed, flip the coverage to be in the 5'->3'
+            #  orientation wrt/ the transcript feature direction
+            if strd == '-':
+                refCoverage = refCoverage[::-1]
+            # Add the SNR
+            coverage += refCoverage
+    # Normalize the coverage only once at the end
+    normCov = coverage / (transCount * expCov)
+    
+    return normCov
+
+
+def getNonCanCovGenes(
+        out_NonCanCovGenes,
+        lenToSNRs,
+        out_db,
+        bamfile,
+        lastBP = 250,
+        covThreshold = 0.05,
+        minLen = 0
+        ):
+    """Function to scan each gene with SNRs and determine whether its RNA-seq
+    coverage can be accounted for by canonical reads in exon-wise ends.
+
+    Parameters
+    ----------
+    out_NonCanCovGenes : (str)
+        Path to the output of this funciton.
+    lenToSNRs : (dict)
+        { SNRlength : [ SNR ] }
+    out_db : (str)
+        Path to the saved GTF/GFF database.
+    bamfile : (str)
+        Path to the (filtered) bam file.
+    lastBP : (int), optional
+        The extent to which to look for coverage at the exon-wise end of the
+        transcript. The default is 250.
+    covThreshold : (float), optional
+        The minimal proportion of non-canonical coverage to include the gene.
+        The default is 0.05.
+    minLen : int, optional
+        Minimal SNR length that needs to be present for a gene to be
+        considered. The default is 0.
+
+    Returns
+    -------
+    nonCanCovGenes : (dict)
+        Genes mapping to tuples of total coverage, transcriptToExons, and
+        lengthToSNR, such that
+        { geneID :
+            (
+                np.array,
+                { ( geneID, start, end ) : [ ( start, end ) ] } ,
+                { SNRlength : [ SNR ] }
+                )
+            }
+    """
+    # For each gene, what proportion of (concordant) coverage is outside of
+    #  the last 250 bp of all exon-wise transcripts?
+    
+    # If the file already exists, simply load
+    if os.path.isfile(out_NonCanCovGenes):
+        nonCanCovGenes = loadPKL(out_NonCanCovGenes)
+        return nonCanCovGenes
+    
+    nonCanCovGenes = {}
+    
+    # Sort SNRs by gene
+    geneLenToSNRs = getGeneLenToSNRs(lenToSNRs, concordant = True)
+    db = gffutils.FeatureDB(out_db, keep_order = True)
+    bam = pysam.AlignmentFile(bamfile, 'rb')
+    
+    # For each gene that has an SNR detected
+    for geneID, lenToSNRs in geneLenToSNRs.items():
+        # If no SNRs of sufficient length are found, skip
+        if all(length < minLen for length in lenToSNRs.keys()):
+            continue
+        # Get the total bp-wise coverage for the gene
+        geneFeat = db[geneID]
+        geneBPcoverage = np.sum(
+            bam.count_coverage(
+                contig = geneFeat.seqid,
+                start = geneFeat.start,
+                stop = geneFeat.end,
+                quality_threshold = 0,
+                read_callback = lambda r:
+                    r.is_reverse == (geneFeat.strand == '-')
+                ),
+            axis = 0
+            )
+        # If there's no gene coverage, skip
+        geneCoverage = sum(geneBPcoverage)
+        if geneCoverage == 0:
+            continue
+        transToExs = {}
+        endings = []
+        endCoverage = 0
+        # Go over ALL transcripts overlapping this gene (even from other genes)
+        #  add up the coverage of exon-wise last X bp
+        for trans in db.features_of_type(
+                featuretype = 'transcript',
+                limit = (geneFeat.seqid, geneFeat.start, geneFeat.end),
+                strand = geneFeat.strand
+                ):
+            # Extract the exons as (start, end)
+            exons = sorted(
+                [
+                    (e.start, e.end) for e in db.children(
+                        trans,
+                        featuretype = 'exon'
+                        )
+                    ]
+                )
+            # Determine the transcripts's exon-wise end
+            remaining = lastBP
+            covStart = None
+            strd = geneFeat.strand == '+'
+            i = -strd
+            f = 1 if strd else -1   # multiplication factor
+            while covStart is None:
+                exLen = exons[i][1] - exons[i][0] + 1
+                if exLen < remaining:
+                    remaining -= exLen
+                    # If we have gone over all exons, take the beginning of
+                    #  the transcript; otherwise keep going
+                    if len(exons) <= abs(i - 1 * f + strd) :
+                        covStart = trans.start if strd else trans.end
+                    else:
+                        i -= 1 * f
+                else:
+                    covStart = exons[i][strd] - remaining * f
+            # Only add the transcript if the transcripts's exon-wise end is
+            #  not beyond the gene end
+            if (strd and covStart <= geneFeat.end) \
+                or (not strd and covStart >= geneFeat.start):
+                    # Extract the gene this transcript belongs to and save
+                    [g] = trans.attributes['gene_id']
+                    transToExs[(g, trans.start, trans.end)] = exons
+                    # Add an ending whose coverage is to be assessed
+                    if strd:
+                        endings.append(
+                            (covStart, min(trans.end, geneFeat.end))
+                            )
+                    else:
+                        endings.append(
+                            (max(trans.start, geneFeat.start), covStart)
+                            )
+                    
+        # Once done going over the transcripts, add up the coverage of endings
+        for (covS, covE) in endings:
+            endCoverage += sum(
+                bam.count_coverage(
+                    contig = geneFeat.seqid,
+                    start = covS,
+                    stop = covE,
+                    quality_threshold = 0,
+                    read_callback = lambda r:
+                        r.is_reverse == (geneFeat.strand == '-')
+                    ),
+                axis = 0
+                )
+        # Add this as an interesting gene only if the unaccounted-for coverage
+        #  (not in endings) exceeds the threshold
+        if (geneCoverage - endCoverage) / geneCoverage >= covThreshold:
+            nonCanCovGenes[geneID] = (geneBPcoverage, transToExs, lenToSNRs)
+        
+    bam.close()
+    savePKL(out_NonCanCovGenes, nonCanCovGenes)    
+    
+    return nonCanCovGenes

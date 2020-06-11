@@ -584,3 +584,35 @@ def normalizeLabels(
         )
     
     return df_norm
+
+
+def getGeneLenToSNRs(lenToSNRs, concordant = True):
+    """Function to sort SNRs by all genes that each of them maps to.
+
+    Parameters
+    ----------
+    lenToSNRs : (dict)
+        { SNRlength : [ SNR ] }
+    concordant : (bool), optional
+        Indicates whether the sorting is by conrordant or discordant genes.
+        The default is True.
+
+    Returns
+    -------
+    geneLenToSNRs : (dict)
+        { gene : { SNRlength : [ SNR ] } }
+    """
+    
+    # Initialize a nested defaultdict
+    geneLenToSNRs = collections.defaultdict(
+        lambda: collections.defaultdict(list)
+        )
+    
+    # Go over all SNRs and sort them by concordant or discordant genes
+    for length, SNRs in lenToSNRs.items():
+        for snr in SNRs:
+            genesOfInterest = snr.concGenes if concordant else snr.discGenes
+            for gene in genesOfInterest:
+                geneLenToSNRs[gene][length].append(snr)
+    
+    return geneLenToSNRs
