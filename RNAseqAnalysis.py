@@ -26,14 +26,34 @@ class NoncGene:
         self.geneFeat = geneF   # gffutils.Feature, gff db gene in quesion
         self.cov = cov          # np.array, the bp-wise coverage of this gene
         self.prop = prop        # float, the non-canonical proportion of cov
-        self.trans = trans      # list, [ gffutils.Feature ] of overlapping Ts
+        self.trans = trans      # list, [ Transcript ] of overlapping Ts
         self.SNRs = SNRs        # dict, { SNRlength : [ SNR ] }
         
     def __str__(self):
         # Displays the base, number of mismatches, and location
-        return '{} NoncGene @ {} strand'.format(
+        return '{} NoncGene @{}-{}({})'.format(
             self.geneFeat.ID,
+            self.geneFeat.start,
+            self.geneFeat.end,
             self.geneFeat.strand
+            )
+
+class Transcript:
+    """An object that stores information about a transcript.
+    """    
+    
+    def __init__(self, geneID, start, end, exons):
+        self.geneID = geneID    # str, geneID of the gene the T belongs to
+        self.start = start      # int, start position on the chromosome
+        self.end = end          # int, end position on the chromosome
+        self.exons = exons      # list, [ (start, end) ] of child Es
+        
+    def __str__(self):
+        # Displays the base, number of mismatches, and location
+        return '{} Transcript @{}-{}'.format(
+            self.geneID,
+            self.start,
+            self.end
             )
 
 
@@ -605,6 +625,11 @@ def getNonCanCovGenes(
                         )
                     ]
                 )
+            [geneID] = trans.attributes['gene_id']
+            # Save all transcripts (lite) on the same strand as the gene
+            transcripts.append(
+                Transcript(geneID, trans.start, trans.end, exons)
+                )
             # Determine the transcripts's exon-wise end
             remaining = lastBP
             covStart = None
@@ -623,12 +648,10 @@ def getNonCanCovGenes(
                         i -= 1 * f
                 else:
                     covStart = exons[i][strd] - remaining * f
-            # Only add the transcript if the transcripts's exon-wise end is
-            #  not beyond the gene end
+            # Only add the ending if the transcripts's exon-wise end is not
+            #  beyond the gene end
             if (strd and covStart <= geneFeat.end) \
                 or (not strd and covStart >= geneFeat.start):
-                    # Save this transcript feature in the list
-                    transcripts.append(trans)
                     # Add an ending whose coverage is to be assessed
                     if strd:
                         endings.append(
@@ -638,7 +661,7 @@ def getNonCanCovGenes(
                         endings.append(
                             (max(trans.start, geneFeat.start), covStart)
                             )
-                    
+
         # Once done going over the transcripts, add up the coverage of endings
         for (covS, covE) in endings:
             endCoverage += np.sum(
@@ -654,7 +677,6 @@ def getNonCanCovGenes(
         # Add this as an interesting gene only if the unaccounted-for coverage
         #  (not in endings) exceeds the threshold
         prop = (geneCoverage - endCoverage) / geneCoverage
-        [biotype] = geneFeat.attributes['gene_biotype']
         if prop >= covThreshold:
             nonCanCovGenes.append(
                 NoncGene(geneFeat, geneBPcov, prop, transcripts, lenToSNRs)
