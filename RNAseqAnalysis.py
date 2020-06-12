@@ -531,6 +531,56 @@ def getCovPerTran(
     return normCov
 
 
+def integrateEnding(nEnd, oldEnds):
+    """Helper function to merge overlapping endings, similar to integrateFeats. 
+
+    Parameters
+    ----------
+    nEnd : (tuple)
+        ( start, end )
+    oldEnds : (list)
+        [ (start, end ) ]
+
+    Returns
+    -------
+    oldEnds : (list)
+        [ ( start, end ) ] such that the endings do not overlap.
+    """
+    
+    # Go over the list of previously saved endings, check for overlap and save
+    #  all the overlaps found in a list.
+    overlaps = []
+    for oEnd in oldEnds:
+        # If (the new End's beginning is within the old End)
+        #  or (the new End's end is within the old End)
+        #  or (the new End spans the old End)
+        #  ), add old End to the overlaps list
+        if (nEnd[0] >= oEnd[0] and nEnd[0] <= oEnd[1]) \
+            or (nEnd[1] >= oEnd[0] and nEnd[1] <= oEnd[1]) \
+            or (nEnd[0] < oEnd[0] and nEnd[1] > oEnd[1]):
+                overlaps.append(oEnd)
+    #  If overlaps have been found, merge with the new one
+    if overlaps != []:
+        # Initialize the start & end of the merged ending using the new End
+        #  (not in the overlaps list)
+        start = nEnd[0]; end = nEnd[1]
+        # Go over all the overlaps & update the start & end as necessary
+        for e in overlaps:
+            if e[0] < start:
+                start = e[0]
+            if e[1] > end:
+                end = e[1]
+            # When done considering this ending, remove it from the master list
+            oldEnds.remove(e)
+        # When done, add the new merged ending to the list
+        oldEnds.append((start, end))
+    # If no overlaps have been found, simply add the new ending
+    else:
+        oldEnds.append(nEnd)
+    
+    return oldEnds
+
+
 def getNonCanCovGenes(
         out_NonCanCovGenes,
         lenToSNRs,
@@ -654,13 +704,10 @@ def getNonCanCovGenes(
                 or (not strd and covStart >= geneFeat.start):
                     # Add an ending whose coverage is to be assessed
                     if strd:
-                        endings.append(
-                            (covStart, min(trans.end, geneFeat.end))
-                            )
+                        newEnding = (covStart, min(trans.end, geneFeat.end))
                     else:
-                        endings.append(
-                            (max(trans.start, geneFeat.start), covStart)
-                            )
+                        newEnding = (max(trans.start,geneFeat.start), covStart)
+                    endings = integrateEnding(newEnding, endings)
 
         # Once done going over the transcripts, add up the coverage of endings
         for (covS, covE) in endings:
