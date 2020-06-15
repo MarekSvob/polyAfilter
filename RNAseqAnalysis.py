@@ -22,17 +22,18 @@ class NoncGene:
     non-canonically covered.
     """    
     
-    def __init__(self, geneF, cov, prop, trans, SNRs):
+    def __init__(self, geneF, cov, prop, trans, SNRs, endings):
         self.geneFeat = geneF   # gffutils.Feature, gff db gene in quesion
         self.cov = cov          # np.array, the bp-wise coverage of this gene
         self.prop = prop        # float, the non-canonical proportion of cov
         self.trans = trans      # list, [ Transcript ] of overlapping Ts
         self.SNRs = SNRs        # dict, { SNRlength : [ SNR ] }
+        self.endings = endings  # list, [ (start, end) ] of exon-wise endings
         
     def __str__(self):
         # Displays the base, number of mismatches, and location
         return '{} NoncGene @{}-{}({})'.format(
-            self.geneFeat.ID,
+            self.geneFeat.id,
             self.geneFeat.start,
             self.geneFeat.end,
             self.geneFeat.strand
@@ -42,18 +43,20 @@ class Transcript:
     """An object that stores information about a transcript.
     """    
     
-    def __init__(self, geneID, start, end, exons):
+    def __init__(self, geneID, start, end, strand, exons, ending):
         self.geneID = geneID    # str, geneID of the gene the T belongs to
         self.start = start      # int, start position on the chromosome
         self.end = end          # int, end position on the chromosome
+        self.strand = strand    # str, '+' or '-'
         self.exons = exons      # list, [ (start, end) ] of child Es
         
     def __str__(self):
         # Displays the base, number of mismatches, and location
-        return '{} Transcript @{}-{}'.format(
+        return '{} Transcript @{}-{}({})'.format(
             self.geneID,
             self.start,
-            self.end
+            self.end,
+            self.strand
             )
 
 
@@ -581,6 +584,44 @@ def integrateEnding(nEnd, oldEnds):
     return oldEnds
 
 
+def removeOverlaps(SNRendings, Tendings):
+    """Helper function to remove portions of SNRendings overlapping Tendings.
+
+    Parameters
+    ----------
+    SNRendings : list
+        [ ( start, end ) ]
+    Tendings : list
+        [ ( start, end ) ]
+
+    Returns
+    -------
+    SNRendings : list
+        [ ( start, end ) ]
+    """
+    # Assume that both endings have the same length - i.e., only one-sided
+    #  overlap is possible.
+    newEndings = []
+    for SNRe in SNRendings:
+        start = SNRe[0]
+        end = SNRe[1]
+        for Te in Tendings:
+            # Treat each case of overlap separately:
+            # Complete overlap / both start & end within
+            if start >= Te[0] and end <= Te[0]:
+                break
+            # Shorten start if start within
+            elif start >= Te[0] and start <= Te[1]:
+                start = Te[1]
+            # Shorten end if end within
+            elif end >= Te[0] and end <= Te[1]:
+                end = Te[0]
+        else:
+            newEndings.append(start, end)
+
+    return sorted(newEndings)
+
+
 def getNonCanCovGenes(
         out_NonCanCovGenes,
         lenToSNRs,
@@ -590,8 +631,8 @@ def getNonCanCovGenes(
         covThreshold = 0.05,
         minLen = 0
         ):
-    """Function to scan each gene with SNRs and determine whether its RNA-seq
-    coverage can be accounted for by canonical reads in exon-wise ends.
+    """Function to scan each gene with SNRs and determine what proportion of
+    its non-canonical RNA-seq coverage may be accounted for by SNRs.
 
     Parameters
     ----------
@@ -607,8 +648,8 @@ def getNonCanCovGenes(
         The extent to which to look for coverage at the exon-wise end of the
         transcript. The default is 250.
     covThreshold : (float), optional
-        The minimal proportion of non-canonical coverage to include the gene.
-        The default is 0.05.
+        The minimal proportion of non-canonical coverage accounted for by SNRs
+        to include the gene. The default is 0.05.
     minLen : int, optional
         Minimal SNR length that needs to be present for a gene to be
         considered. The default is 0.
@@ -619,9 +660,7 @@ def getNonCanCovGenes(
         Genes found to have a significant proportion of coverage outside of
         the canonically expected area.
     """
-    # For each gene, what proportion of (concordant) coverage is outside of
-    #  the last 250 bp of all exon-wise transcripts?
-    
+    # Note that all except gffutils feats is 0-based    
     # If the file already exists, simply load
     if os.path.isfile(out_NonCanCovGenes):
         nonCanCovGenes = loadPKL(out_NonCanCovGenes)
@@ -644,7 +683,7 @@ def getNonCanCovGenes(
         geneBPcov = np.sum(
             bam.count_coverage(
                 contig = geneFeat.seqid,
-                start = geneFeat.start,
+                start = geneFeat.start - 1,     # Convert 1-based => 0-based
                 stop = geneFeat.end,
                 quality_threshold = 0,
                 read_callback = lambda r:
@@ -657,8 +696,8 @@ def getNonCanCovGenes(
         if geneCoverage == 0:
             continue
         transcripts = []
-        endings = []
-        endCoverage = 0
+        Tendings = []
+        strd = geneFeat.strand == '+'
         # Go over ALL transcripts overlapping this gene (even from other genes)
         #  add up the coverage of exon-wise last X bp
         for trans in db.features_of_type(
@@ -669,21 +708,21 @@ def getNonCanCovGenes(
             # Extract the exons as (start, end)
             exons = sorted(
                 [
-                    (e.start, e.end) for e in db.children(
-                        trans,
-                        featuretype = 'exon'
+                    (e.start - 1, e.end) for e in db.children(  # 1- => 0-based
+                        trans, featuretype = 'exon'
                         )
                     ]
                 )
             [geneID] = trans.attributes['gene_id']
             # Save all transcripts (lite) on the same strand as the gene
             transcripts.append(
-                Transcript(geneID, trans.start, trans.end, exons)
+                Transcript(
+                    geneID, trans.start - 1, trans.end, trans.strand, exons
+                    )   # 1-based => 0-based
                 )
             # Determine the transcripts's exon-wise end
             remaining = lastBP
             covStart = None
-            strd = geneFeat.strand == '+'
             i = -strd
             f = 1 if strd else -1   # multiplication factor
             while covStart is None:
@@ -692,25 +731,62 @@ def getNonCanCovGenes(
                     remaining -= exLen
                     # If we have gone over all exons, take the beginning of
                     #  the transcript; otherwise keep going
-                    if len(exons) <= abs(i - 1 * f + strd) :
+                    if abs(i - 1 * f + strd) >=  len(exons):
                         covStart = trans.start if strd else trans.end
                     else:
                         i -= 1 * f
                 else:
                     covStart = exons[i][strd] - remaining * f
             # Only add the ending if the transcripts's exon-wise end is not
-            #  beyond the gene end
-            if (strd and covStart <= geneFeat.end) \
-                or (not strd and covStart >= geneFeat.start):
-                    # Add an ending whose coverage is to be assessed
+            #  beyond the gene end (in case it is from another gene)
+            if strd and covStart <= geneFeat.end:
+                newEnding = (covStart, min(trans.end, geneFeat.end))
+            elif not strd and covStart >= geneFeat.start:
+                newEnding = (max(trans.start,geneFeat.start), covStart)
+            Tendings = integrateEnding(newEnding, Tendings)
+        # Extract and merge all the SNR endings
+        SNRendings = []
+        for length, snrs in lenToSNRs.items():
+            if length >= minLen:
+                for snr in snrs:
                     if strd:
-                        newEnding = (covStart, min(trans.end, geneFeat.end))
+                        if snr.start < geneFeat.start:
+                            continue
+                        else:
+                            newSNRe = (
+                                max(geneFeat.start, snr.start - lastBP),
+                                min(snr.start, geneFeat.end)
+                                )
                     else:
-                        newEnding = (max(trans.start,geneFeat.start), covStart)
-                    endings = integrateEnding(newEnding, endings)
-
-        # Once done going over the transcripts, add up the coverage of endings
-        for (covS, covE) in endings:
+                        if snr.end > geneFeat.end:
+                            continue
+                        else:
+                            newSNRe = (
+                                max(geneFeat.start, snr.end),
+                                min(snr.start + lastBP, geneFeat.end)
+                                )
+                    SNRendings = integrateEnding(newSNRe, SNRendings)
+        # Remove the portions of SNRendings overlapped by Tendings
+        SNRendings = removeOverlaps(SNRendings, Tendings)
+        # Get the SNR coverage attributable to SNRs
+        snrCoverage = 0
+        for covS, covE in SNRendings:
+            snrCoverage += np.sum(
+                bam.count_coverage(
+                    contig = geneFeat.seqid,
+                    start = covS,
+                    stop = covE,
+                    quality_threshold = 0,
+                    read_callback = lambda r:
+                        r.is_reverse == (geneFeat.strand == '-')
+                    )
+                )
+        # If no SNR-only coverage has been detected, skip the gene
+        if snrCoverage == 0:
+            continue
+        # Get the coverage of transcripts endings
+        endCoverage = 0
+        for covS, covE in Tendings:
             endCoverage += np.sum(
                 bam.count_coverage(
                     contig = geneFeat.seqid,
@@ -721,14 +797,15 @@ def getNonCanCovGenes(
                         r.is_reverse == (geneFeat.strand == '-')
                     )
                 )
-        # Add this as an interesting gene only if the unaccounted-for coverage
-        #  (not in endings) exceeds the threshold
-        prop = (geneCoverage - endCoverage) / geneCoverage
+        # Add this as an interesting gene only if the proportion of
+        #  non-canonical coverage attributable to SNRs exceeds the threshold
+        prop = snrCoverage / (geneCoverage - endCoverage)
         if prop >= covThreshold:
             nonCanCovGenes.append(
-                NoncGene(geneFeat, geneBPcov, prop, transcripts, lenToSNRs)
+                NoncGene(
+                    geneFeat, geneBPcov, prop, transcripts, lenToSNRs, Tendings
+                    )
                 )
-
     bam.close()
     savePKL(out_NonCanCovGenes, nonCanCovGenes)    
     
