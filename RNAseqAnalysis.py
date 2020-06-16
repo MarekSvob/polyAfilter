@@ -43,11 +43,10 @@ class Transcript:
     """An object that stores information about a transcript.
     """    
     
-    def __init__(self, geneID, start, end, strand, exons):
+    def __init__(self, geneID, start, end, exons):
         self.geneID = geneID    # str, geneID of the gene the T belongs to
         self.start = start      # int, start position on the chromosome
         self.end = end          # int, end position on the chromosome
-        self.strand = strand    # str, '+' or '-'
         self.exons = exons      # list, [ (start, end) ] of child Es
         
     def __str__(self):
@@ -710,20 +709,13 @@ def getNonCanCovGenes(
                 limit = (geneFeat.seqid, geneFeat.start, geneFeat.end),
                 strand = geneFeat.strand
                 ):
-            # Extract the exons as (start, end)
-            exons = sorted(
-                [
-                    (e.start - 1, e.end) for e in db.children(  # 1- => 0-based
-                        trans, featuretype = 'exon'
-                        )
-                    ]
-                )
+            # Extract the exons as (start, end); 1- => 0-based
+            exons = sorted([(e.start - 1, e.end) \
+                            for e in db.children(trans, featuretype = 'exon')])
             [geneID] = trans.attributes['gene_id']
             # Save all transcripts (lite) on the same strand as the gene
-            transcripts.append(
-                Transcript(
-                    geneID, trans.start - 1, trans.end, trans.strand, exons
-                    )   # 1-based => 0-based
+            transcripts.append(             # 1-based => 0-based
+                Transcript(geneID, trans.start - 1, trans.end, exons)
                 )
             # Determine the transcripts's exon-wise end
             remaining = lastBP
@@ -745,9 +737,14 @@ def getNonCanCovGenes(
             # Only add the ending if the transcripts's exon-wise end is not
             #  beyond the gene end (in case it is from another gene)
             if strd and covStart <= geneFeat.end:
-                newEnding = (covStart, min(trans.end, geneFeat.end))
+                newEnding = (
+                    max(covStart, geneFeat.start), min(trans.end, geneFeat.end)
+                    )
             elif not strd and covStart >= geneFeat.start:
-                newEnding = (max(trans.start,geneFeat.start), covStart)
+                newEnding = (
+                    max(trans.start, geneFeat.start),
+                    min(covStart, geneFeat.end)
+                    )
             Tendings = integrateEnding(newEnding, Tendings)
         # Extract and merge all the SNR endings
         SNRendings = []
@@ -755,19 +752,19 @@ def getNonCanCovGenes(
             if length >= minLen:
                 for snr in snrs:
                     if strd:
-                        if snr.start < geneFeat.start:
+                        if snr.start <= geneFeat.start:
                             continue
                         else:
                             newSNRe = (
-                                max(geneFeat.start, snr.start - lastBP),
+                                max(snr.start - lastBP, geneFeat.start),
                                 min(snr.start, geneFeat.end)
                                 )
                     else:
-                        if snr.end > geneFeat.end:
+                        if snr.end >= geneFeat.end:
                             continue
                         else:
                             newSNRe = (
-                                max(geneFeat.start, snr.end),
+                                max(snr.end, geneFeat.start),
                                 min(snr.end + lastBP, geneFeat.end)
                                 )
                     SNRendings = integrateEnding(newSNRe, SNRendings)
