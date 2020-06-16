@@ -43,7 +43,7 @@ class Transcript:
     """An object that stores information about a transcript.
     """    
     
-    def __init__(self, geneID, start, end, strand, exons, ending):
+    def __init__(self, geneID, start, end, strand, exons):
         self.geneID = geneID    # str, geneID of the gene the T belongs to
         self.start = start      # int, start position on the chromosome
         self.end = end          # int, end position on the chromosome
