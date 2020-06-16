@@ -580,7 +580,7 @@ def integrateEnding(nEnd, oldEnds):
     else:
         oldEnds.append(nEnd)
     
-    return oldEnds
+    return sorted(oldEnds)
 
 
 def removeOverlaps(SNRendings, Tendings):
@@ -670,13 +670,16 @@ def getNonCanCovGenes(
         nonCanCovGenes = loadPKL(out_NonCanCovGenes)
         return nonCanCovGenes
     
+    print(
+        'Looking for genes with non-canonical coverage >{:.0%}...'.format(
+            covThreshold
+            )
+        )
     nonCanCovGenes = []
-    
     # Sort SNRs by gene
     geneLenToSNRs = getGeneLenToSNRs(lenToSNRs, concordant = True)
     db = gffutils.FeatureDB(out_db, keep_order = True)
     bam = pysam.AlignmentFile(bamfile, 'rb')
-    
     # For each gene that has an SNR detected
     for geneID, lenToSNRs in geneLenToSNRs.items():
         # If no SNRs of sufficient length are found, skip
@@ -736,37 +739,35 @@ def getNonCanCovGenes(
                     covStart = exons[i][strd] - remaining * f
             # Only add the ending if the transcripts's exon-wise end is not
             #  beyond the gene end (in case it is from another gene)
-            if strd and covStart <= geneFeat.end:
+            if strd and covStart < geneFeat.end:
                 newEnding = (
                     max(covStart, geneFeat.start), min(trans.end, geneFeat.end)
                     )
-            elif not strd and covStart >= geneFeat.start:
+            elif not strd and covStart > geneFeat.start:
                 newEnding = (
                     max(trans.start, geneFeat.start),
                     min(covStart, geneFeat.end)
                     )
+            else:
+                continue
             Tendings = integrateEnding(newEnding, Tendings)
         # Extract and merge all the SNR endings
         SNRendings = []
         for length, snrs in lenToSNRs.items():
             if length >= minLen:
                 for snr in snrs:
-                    if strd:
-                        if snr.start <= geneFeat.start:
-                            continue
-                        else:
-                            newSNRe = (
-                                max(snr.start - lastBP, geneFeat.start),
-                                min(snr.start, geneFeat.end)
-                                )
+                    if strd and snr.start > geneFeat.start:
+                        newSNRe = (
+                            max(snr.start - lastBP, geneFeat.start),
+                            min(snr.start, geneFeat.end)
+                            )
+                    elif not strd and snr.end < geneFeat.end:
+                        newSNRe = (
+                            max(snr.end, geneFeat.start),
+                            min(snr.end + lastBP, geneFeat.end)
+                            )
                     else:
-                        if snr.end >= geneFeat.end:
-                            continue
-                        else:
-                            newSNRe = (
-                                max(snr.end, geneFeat.start),
-                                min(snr.end + lastBP, geneFeat.end)
-                                )
+                        continue
                     SNRendings = integrateEnding(newSNRe, SNRendings)
         # Remove the portions of SNRendings overlapped by Tendings
         SNRendings = removeOverlaps(SNRendings, Tendings)
