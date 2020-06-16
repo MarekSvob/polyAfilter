@@ -617,7 +617,7 @@ def removeOverlaps(SNRendings, Tendings):
             elif end >= Te[0] and end <= Te[1]:
                 end = Te[0]
         else:
-            newEndings.append(start, end)
+            newEndings.append((start, end))
 
     return sorted(newEndings)
 
