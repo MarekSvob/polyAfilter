@@ -599,8 +599,7 @@ def removeOverlaps(SNRendings, Tendings):
     SNRendings : list
         [ ( start, end ) ]
     """
-    # Assume that both endings have the same length - i.e., only one-sided
-    #  overlap is possible.
+
     newEndings = []
     for SNRe in SNRendings:
         start = SNRe[0]
@@ -608,7 +607,7 @@ def removeOverlaps(SNRendings, Tendings):
         for Te in Tendings:
             # Treat each case of overlap separately:
             # Complete overlap / both start & end within
-            if start >= Te[0] and end <= Te[0]:
+            if start >= Te[0] and end <= Te[1]:
                 break
             # Shorten start if start within
             elif start >= Te[0] and start <= Te[1]:
@@ -616,6 +615,12 @@ def removeOverlaps(SNRendings, Tendings):
             # Shorten end if end within
             elif end >= Te[0] and end <= Te[1]:
                 end = Te[0]
+            # If a Tending is within a SNRending, treat this recursively
+            elif start < Te[0] and end > Te[1]:
+                newEndings.extend(
+                    removeOverlaps([(start, Te[0]), (Te[1], end)], Tendings)
+                    )
+                break
         else:
             newEndings.append((start, end))
 
@@ -763,7 +768,7 @@ def getNonCanCovGenes(
                         else:
                             newSNRe = (
                                 max(geneFeat.start, snr.end),
-                                min(snr.start + lastBP, geneFeat.end)
+                                min(snr.end + lastBP, geneFeat.end)
                                 )
                     SNRendings = integrateEnding(newSNRe, SNRendings)
         # Remove the portions of SNRendings overlapped by Tendings
