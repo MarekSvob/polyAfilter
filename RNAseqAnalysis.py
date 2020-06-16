@@ -12,6 +12,7 @@ import collections
 import numpy as np
 from SNRanalysis import getStrandedFeats, getGeneLenToSNRs
 from SNRdetection import savePKL, loadPKL
+from IPython.display import clear_output
 
 expCovConc = 0
 expCovDisc = 0
@@ -670,28 +671,34 @@ def getNonCanCovGenes(
         nonCanCovGenes = loadPKL(out_NonCanCovGenes)
         return nonCanCovGenes
     
-    print(
-        'Looking for genes with non-canonical coverage >{:.0%}...'.format(
-            covThreshold
-            )
-        )
     nonCanCovGenes = []
     # Sort SNRs by gene
     geneLenToSNRs = getGeneLenToSNRs(lenToSNRs, concordant = True)
     db = gffutils.FeatureDB(out_db, keep_order = True)
     bam = pysam.AlignmentFile(bamfile, 'rb')
+    progressTracker = 0
+    prog = 0
     # For each gene that has an SNR detected
-    for geneID, lenToSNRs in geneLenToSNRs.items():
+    for geneID, glenToSNRs in geneLenToSNRs.items():
+        newProg = round(progressTracker / len(geneLenToSNRs), 2)
+        if newProg != prog:
+            prog = newProg
+            print('Looking for genes with non-canonical'\
+                  ' coverage... ({:.0%})'.format(prog))
+            clear_output(wait = True)
+        progressTracker += 1
         # If no SNRs of sufficient length are found, skip
-        if all(length < minLen for length in lenToSNRs.keys()):
+        if all(length < minLen for length in glenToSNRs.keys()):
             continue
         # Get the total bp-wise coverage for the gene
         geneFeat = db[geneID]
+        gene0start = geneFeat.start - 1     # Conversion to 0-based
+        gene0end = geneFeat.end             # Conversion to 0-based
         geneBPcov = np.sum(
             bam.count_coverage(
                 contig = geneFeat.seqid,
-                start = geneFeat.start - 1,     # Convert 1-based => 0-based
-                stop = geneFeat.end,
+                start = gene0start,
+                stop = gene0end,
                 quality_threshold = 0,
                 read_callback = lambda r:
                     r.is_reverse == (geneFeat.strand == '-')
@@ -709,16 +716,18 @@ def getNonCanCovGenes(
         #  add up the coverage of exon-wise last X bp
         for trans in db.features_of_type(
                 featuretype = 'transcript',
-                limit = (geneFeat.seqid, geneFeat.start, geneFeat.end),
+                limit = (geneFeat.seqid, gene0start, gene0end),
                 strand = geneFeat.strand
                 ):
             # Extract the exons as (start, end); 1- => 0-based
             exons = sorted([(e.start - 1, e.end) \
                             for e in db.children(trans, featuretype = 'exon')])
+            trans0start = trans.start - 1       # Conversion to 0-based
+            trans0end = trans.end               # Conversion to 0-based
             [geneID] = trans.attributes['gene_id']
             # Save all transcripts (lite) on the same strand as the gene
-            transcripts.append(             # 1-based => 0-based
-                Transcript(geneID, trans.start - 1, trans.end, exons)
+            transcripts.append(
+                Transcript(geneID, trans0start, trans0end, exons)
                 )
             # Determine the transcripts's exon-wise end
             remaining = lastBP
@@ -732,39 +741,40 @@ def getNonCanCovGenes(
                     # If we have gone over all exons, take the beginning of
                     #  the transcript; otherwise keep going
                     if abs(i - 1 * f + strd) >=  len(exons):
-                        covStart = trans.start if strd else trans.end
+                        covStart = trans0start if strd else trans0end
                     else:
                         i -= 1 * f
                 else:
                     covStart = exons[i][strd] - remaining * f
             # Only add the ending if the transcripts's exon-wise end is not
             #  beyond the gene end (in case it is from another gene)
-            if strd and covStart < geneFeat.end:
+            if strd and covStart < gene0end:
                 newEnding = (
-                    max(covStart, geneFeat.start), min(trans.end, geneFeat.end)
+                    max(covStart, gene0start),
+                    min(trans0end, gene0end)
                     )
-            elif not strd and covStart > geneFeat.start:
+            elif not strd and covStart > gene0start:
                 newEnding = (
-                    max(trans.start, geneFeat.start),
-                    min(covStart, geneFeat.end)
+                    max(trans0start, gene0start),
+                    min(covStart, gene0end)
                     )
             else:
                 continue
             Tendings = integrateEnding(newEnding, Tendings)
         # Extract and merge all the SNR endings
         SNRendings = []
-        for length, snrs in lenToSNRs.items():
+        for length, snrs in glenToSNRs.items():
             if length >= minLen:
                 for snr in snrs:
-                    if strd and snr.start > geneFeat.start:
+                    if strd and snr.start > gene0start:
                         newSNRe = (
-                            max(snr.start - lastBP, geneFeat.start),
-                            min(snr.start, geneFeat.end)
+                            max(snr.start - lastBP, gene0start),
+                            min(snr.start, gene0end)
                             )
-                    elif not strd and snr.end < geneFeat.end:
+                    elif not strd and snr.end < gene0end:
                         newSNRe = (
-                            max(snr.end, geneFeat.start),
-                            min(snr.end + lastBP, geneFeat.end)
+                            max(snr.end, gene0start),
+                            min(snr.end + lastBP, gene0end)
                             )
                     else:
                         continue
@@ -806,10 +816,10 @@ def getNonCanCovGenes(
         if prop >= covThreshold:
             nonCanCovGenes.append(
                 NoncGene(
-                    geneFeat, geneBPcov, prop, transcripts, lenToSNRs, Tendings
+                    geneFeat, geneBPcov, prop, transcripts, glenToSNRs, Tendings
                     )
                 )
     bam.close()
-    savePKL(out_NonCanCovGenes, nonCanCovGenes)    
+    savePKL(out_NonCanCovGenes, nonCanCovGenes)
     
     return nonCanCovGenes
