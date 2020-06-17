@@ -23,12 +23,11 @@ class NoncGene:
     non-canonically covered.
     """    
     
-    def __init__(self, geneF, cov, prop, trans, SNRs, endings):
-        self.geneFeat = geneF   # gffutils.Feature, gff db gene in quesion
+    def __init__(self, geneF, cov, trans, SNRs, endings):
+        self.geneFeat = geneF   # gffutils.Feature, gff db gene in question
         self.cov = cov          # np.array, the bp-wise coverage of this gene
-        self.prop = prop        # float, the non-canonical proportion of cov
         self.trans = trans      # list, [ Transcript ] of overlapping Ts
-        self.SNRs = SNRs        # dict, { SNRlength : [ SNR ] }
+        self.SNRs = SNRs        # dict, { SNRlength : ( float, [ SNR ] ) }
         self.endings = endings  # list, [ (start, end) ] of exon-wise endings
         
     def __str__(self):
@@ -680,11 +679,11 @@ def getNonCanCovGenes(
     prog = 0
     # For each gene that has an SNR detected
     for geneID, glenToSNRs in geneLenToSNRs.items():
-        newProg = round(progressTracker / len(geneLenToSNRs), 2)
+        newProg = round(progressTracker / len(geneLenToSNRs), 3)
         if newProg != prog:
             prog = newProg
             print('Looking for genes with non-canonical'\
-                  ' coverage... ({:.0%})'.format(prog))
+                  ' coverage... ({:.1%})'.format(prog))
             clear_output(wait = True)
         progressTracker += 1
         # If no SNRs of sufficient length are found, skip
@@ -761,9 +760,24 @@ def getNonCanCovGenes(
             else:
                 continue
             Tendings = integrateEnding(newEnding, Tendings)
-        # Extract and merge all the SNR endings
-        SNRendings = []
+        # Get the coverage of transcripts endings
+        endCoverage = 0
+        for covS, covE in Tendings:
+            endCoverage += np.sum(
+                bam.count_coverage(
+                    contig = geneFeat.seqid,
+                    start = covS,
+                    stop = covE,
+                    quality_threshold = 0,
+                    read_callback = lambda r:
+                        r.is_reverse == (geneFeat.strand == '-')
+                    )
+                )
+        totalSNRcovProp = 0
+        lenToCovSNRs = {}
+        # Extract and merge the SNR endings by length
         for length, snrs in glenToSNRs.items():
+            SNRendings = []
             if length >= minLen:
                 for snr in snrs:
                     if strd and snr.start > gene0start:
@@ -778,45 +792,34 @@ def getNonCanCovGenes(
                             )
                     else:
                         continue
+                    # Add the new ending to the list without overlap
                     SNRendings = integrateEnding(newSNRe, SNRendings)
-        # Remove the portions of SNRendings overlapped by Tendings
-        SNRendings = removeOverlaps(SNRendings, Tendings)
-        # Get the SNR coverage attributable to SNRs
-        snrCoverage = 0
-        for covS, covE in SNRendings:
-            snrCoverage += np.sum(
-                bam.count_coverage(
-                    contig = geneFeat.seqid,
-                    start = covS,
-                    stop = covE,
-                    quality_threshold = 0,
-                    read_callback = lambda r:
-                        r.is_reverse == (geneFeat.strand == '-')
-                    )
-                )
-        # If no SNR-only coverage has been detected, skip the gene
-        if snrCoverage == 0:
-            continue
-        # Get the coverage of transcripts endings
-        endCoverage = 0
-        for covS, covE in Tendings:
-            endCoverage += np.sum(
-                bam.count_coverage(
-                    contig = geneFeat.seqid,
-                    start = covS,
-                    stop = covE,
-                    quality_threshold = 0,
-                    read_callback = lambda r:
-                        r.is_reverse == (geneFeat.strand == '-')
-                    )
-                )
-        # Add this as an interesting gene only if the proportion of
+                # Remove the portions of SNRendings overlapped by Tendings
+                SNRendings = removeOverlaps(SNRendings, Tendings)
+                # Get the SNR coverage attributable to SNRs of this length
+                snrCoverage = 0
+                for covS, covE in SNRendings:
+                    snrCoverage += np.sum(
+                        bam.count_coverage(
+                            contig = geneFeat.seqid,
+                            start = covS,
+                            stop = covE,
+                            quality_threshold = 0,
+                            read_callback = lambda r:
+                                r.is_reverse == (geneFeat.strand == '-')
+                            )
+                        )
+                prop = snrCoverage / (geneCoverage - endCoverage)
+                totalSNRcovProp += prop
+                lenToCovSNRs[length] = (prop, snrs)
+        # Add this as an interesting gene only if the total proportion of
         #  non-canonical coverage attributable to SNRs exceeds the threshold
-        prop = snrCoverage / (geneCoverage - endCoverage)
-        if prop >= covThreshold:
+        #  Note that the SNR coverage between lengths may overlap, so this is
+        #  only an estimate
+        if totalSNRcovProp >= covThreshold:
             nonCanCovGenes.append(
                 NoncGene(
-                    geneFeat, geneBPcov, prop, transcripts, glenToSNRs, Tendings
+                    geneFeat, geneBPcov, transcripts, lenToCovSNRs, Tendings
                     )
                 )
     bam.close()
