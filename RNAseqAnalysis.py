@@ -584,7 +584,8 @@ def integrateEnding(nEnd, oldEnds):
 
 
 def removeOverlaps(SNRendings, Tendings):
-    """Helper function to remove portions of SNRendings overlapping Tendings.
+    """Helper function to remove portions of SNRendings (exons) that are
+    overlapped by Tendings (endpieces). All 0-based.
 
     Parameters
     ----------
@@ -603,23 +604,26 @@ def removeOverlaps(SNRendings, Tendings):
     for SNRe in SNRendings:
         start = SNRe[0]
         end = SNRe[1]
+        # Look for any overlap with Tendings
         for Te in Tendings:
             # Treat each case of overlap separately:
             # Complete overlap / both start & end within
             if start >= Te[0] and end <= Te[1]:
                 break
-            # Shorten start if start within
+            # Shorten start if only start within
             elif start >= Te[0] and start <= Te[1]:
                 start = Te[1]
-            # Shorten end if end within
+            # Shorten end if only end within
             elif end >= Te[0] and end <= Te[1]:
                 end = Te[0]
-            # If a Tending is within a SNRending, treat this recursively
+            # If a Tending is entirely within an SNRending, treat recursively,
+            #  with the two overhangs each as a new separate SNRending
             elif start < Te[0] and end > Te[1]:
                 newEndings.extend(
                     removeOverlaps([(start, Te[0]), (Te[1], end)], Tendings)
                     )
                 break
+        # If none found, just add as is
         else:
             newEndings.append((start, end))
 
@@ -719,8 +723,13 @@ def getNonCanCovGenes(
                 strand = geneFeat.strand
                 ):
             # Extract the exons as (start, end); 1- => 0-based
-            exons = sorted([(e.start - 1, e.end) \
-                            for e in db.children(trans, featuretype = 'exon')])
+            exons = sorted(
+                [(e.start - 1, e.end) for e in db.children(
+                    trans,
+                    featuretype = 'exon'
+                    )],
+                reverse = strd      # Order from last to 1st wrt/ the strand
+                )
             trans0start = trans.start - 1       # Conversion to 0-based
             trans0end = trans.end               # Conversion to 0-based
             [geneID] = trans.attributes['gene_id']
@@ -731,20 +740,18 @@ def getNonCanCovGenes(
             # Determine the transcripts's exon-wise end
             remaining = lastBP
             covStart = None
-            i = -strd
-            f = 1 if strd else -1   # multiplication factor
-            while covStart is None:
-                exLen = exons[i][1] - exons[i][0] + 1
+            # Go over exons from last to first wrt/ the strand
+            for exon in exons:
+                exLen = exon[1] - exon[0]
                 if exLen < remaining:
                     remaining -= exLen
-                    # If we have gone over all exons, take the beginning of
-                    #  the transcript; otherwise keep going
-                    if abs(i - 1 * f + strd) >=  len(exons):
-                        covStart = trans0start if strd else trans0end
-                    else:
-                        i -= 1 * f
                 else:
-                    covStart = exons[i][strd] - remaining * f
+                    covStart = exon[1] - remaining if strd \
+                        else exon[0] + remaining
+                    break
+            # If we have exhausted all exons, take the beginning of the tran
+            else:
+                covStart = trans0start if strd else trans0end
             # Only add the ending if the transcripts's exon-wise end is not
             #  beyond the gene end (in case it is from another gene)
             if strd and covStart < gene0end:
@@ -826,3 +833,213 @@ def getNonCanCovGenes(
     savePKL(out_NonCanCovGenes, nonCanCovGenes)
     
     return nonCanCovGenes
+        
+
+def getTransEndSensSpec(
+        out_db,
+        bamfile,
+        endLenMin = 50,
+        endLenMax = 250,
+        results = {},
+        baselineData = None
+        ):
+    """Function to provide data for a ROC curve for various transcript end
+    lengths.
+    
+    Parameters
+    ----------
+    out_db : (str)
+        Path to the saved GTF/GFF database.
+    bamfile : (str)
+        Path to the (filtered) bam file.
+    endLenMin : (int), optional
+        The minimal length of exon-wise transcript end to consider.
+        The default is 50.
+    endLenMax : (int), optional
+        The minimal length of exon-wise transcript end to consider.
+        The default is 150.
+    results : (dict)
+        { endLen : (sensitivity, specificity) }. The default is {}.
+    baselineData : (dict), optional
+        { totalExCov, totalExNonCovBP, exonsByStrdRef }, where
+        exonsByStrdRef = { ref : [ (start, end) ] }. The default is None.
+
+    Returns
+    -------
+    results : (dict)
+        { endLen : (sensitivity, specificity) }
+    baselineData : (dict), optional
+        { totalExCov, totalExNonCovBP, exonsByStrdRef }, where
+        exonsByStrdRef = { ref : [ (start, end) ] }. The default is None.
+    """
+    # Notes:
+    # Sensitivity = percentage of total exonic coverage captured by the
+    #  transcript ends of a given length
+    #  - Get total read coverage of all flattened exons
+    #  - Get total read coverage of all exon-wise transcript ends
+    #  = ENDS / TOTAL
+    # Specificity = percentage of non-covered exon area not overlapped
+    #  by transcript ends
+    #  - Sum the number of flattened exon bases without coverage
+    #  - Sum the number of flattened exon bases that do not overlap ends
+    #  = NON-ENDS / NON-COVERAGE
+    # Do this for multiple end lengths & make ROC
+    # !!! Only consider genes with coverage (expressed)!
+    
+    # Initialize variables as needed
+    if baselineData is None:
+        totalExCov = 0
+        totalExNonCovBP = 0
+        exonsByStrdRef = {}
+    else:
+        totalExCov = baselineData[0]
+        totalExNonCovBP = baselineData[1]
+        exonsByStrdRef = baselineData[2]
+        
+    db = gffutils.FeatureDB(out_db, keep_order = True)
+    bam = pysam.AlignmentFile(bamfile, 'rb')
+    references = bam.references
+    
+    refCounter = 0
+    totalRefs = len(references) * 2     # For each strand
+    # Do the end measurements for each potential end lengths min, mid, max
+    for endLength in (endLenMin, np.mean(endLenMin, endLenMax), endLenMax):
+        # Get the flattened transcript exon-wise end pieces across the genome
+        # Re-using the code from getStrandedFeats()
+        endsCov = 0
+        nonCovStartBP = 0
+        # Go over each strand separately
+        for strd in (True, False):
+            # Initialize exons by ref for each strand
+            if baselineData is None:
+                exonsByRef = {}
+            else:
+                exonsByRef = exonsByStrdRef[strd]
+            # Work for each reference separately
+            for refname in references:
+                refCounter += 1
+                clear_output()
+                print(
+                    'Processing transcript ends of length {}...{:.2%}'.format(
+                        endLength,
+                        refCounter / totalRefs
+                        )
+                    )
+                refEndPieces = []
+                # If not extracted before, initialize exons for this ref
+                if baselineData is None:
+                    refExons = []
+                # Iterate through each transcript
+                for trans in db.features_of_type(
+                    featuretype = 'transcript',
+                    limit = (refname, 1, bam.get_reference_length(refname)),
+                    strand = '+' if strd else '-'
+                    ):
+                    # Process this transcript only if it has ANY coverage
+                    transCov = np.sum(
+                        bam.count_coverage(
+                            contig = trans.seqid,
+                            start = trans.start - 1,      # 1-based => 0-based
+                            stop = trans.end,
+                            quality_threshold = 0,
+                            read_callback = lambda r: r.is_reverse != strd
+                            )
+                        )
+                    if transCov == 0:
+                        continue
+                    # Extract exons from the transcript, last-to-first
+                    exons = sorted(
+                        [(e.start - 1, e.end) for e in db.children(
+                            trans,
+                            featuretype = 'exon'
+                            )],
+                        reverse = strd
+                        )
+                    # If not done before, add all relevant exons to the
+                    #  flattened ref exon list
+                    if baselineData is None:
+                        for exon in exons:
+                            refExons = integrateEnding(exon, refExons)
+                    # Extract & save exon-wise endpieces for this transcript
+                    remaining = endLength
+                    # For each exon, check whether it is longer than the
+                    #  remaining endLength
+                    for exon in exons:
+                        exLen = exon[1] - exon[0]
+                        # If not, add the entire exon
+                        if exLen < remaining:
+                            refEndPieces = integrateEnding(exon, refEndPieces)
+                            remaining -= exLen
+                        # Otherwise add only the remaining piece
+                        else:
+                            refEndPieces = integrateEnding(
+                                (exon[1] - remaining, exon[1]) if strd \
+                                    else (exon[0], exon[0] + remaining),
+                                refEndPieces
+                                )
+                            break
+                
+                # For each reference (on each strand), extract and add the
+                #  total exon coverage and non-covBP (if not done before),
+                #  the end coverage, and the non-endBP
+                if baselineData is None:
+                    # Save the refExons, if not done before
+                    exonsByRef[refname] = refExons
+                    for ex in refExons:
+                        # Get bp-wise coverage for all flattened exons
+                        exCov = np.sum(
+                            bam.count_coverage(
+                                contig = refname,
+                                start = ex[0],      # already 0-based
+                                stop = ex[1],
+                                quality_threshold = 0,
+                                read_callback = lambda r: r.is_reverse != strd
+                                ),
+                            axis = 0
+                            )
+                        totalExCov += np.sum(exCov)
+                        totalExNonCovBP += np.count_nonzero(exCov == 0)
+                # Get the exon-wise end piece coverage
+                for refEndpiece in refEndPieces:
+                    endsCov += np.sum(
+                        bam.count_coverage(
+                            contig = refname,
+                            start = refEndpiece[0],      # already 0-based
+                            stop = refEndpiece[1],
+                            quality_threshold = 0,
+                            read_callback = lambda r: r.is_reverse != strd
+                            )
+                        )
+                # Remove the portions of flattened exons overlapped by
+                #  endpieces and save as starts
+                refStarts = removeOverlaps(exonsByRef[refname], refEndPieces)
+                # Get the number of non-covered BPs across exon-wise starts
+                for refStart in refStarts:
+                    startsCov = np.sum(
+                        bam.count_coverage(
+                            contig = refname,
+                            start = refStart[0],      # already 0-based
+                            stop = refStart[1],
+                            quality_threshold = 0,
+                            read_callback = lambda r: r.is_reverse != strd
+                            ),
+                        axis = 0
+                        )
+                    nonCovStartBP += np.count_nonzero(startsCov == 0)
+                
+            # Save the exons by ref for this strand, if not done before
+            if baselineData is None:
+                exonsByStrdRef[strd] = exonsByRef
+        # When done going over both strands, if not done before, save the
+        #  baseline data so that this does not have to be done again for other
+        #  end lengths
+        if baselineData is None:
+               baselineData = (totalExCov, totalExNonCovBP, exonsByStrdRef)
+        # Save the results for each length
+        results[endLength] = (
+            endsCov / totalExCov,               # Sensitivity
+            nonCovStartBP / totalExNonCovBP     # Specificity
+            )
+    bam.close()
+
+    return results, baselineData
