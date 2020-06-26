@@ -903,7 +903,7 @@ def getTransEndSensSpec(
     refCounter = 0
     totalRefs = len(references) * 2     # For each strand
     # Do the end measurements for each potential end lengths min, mid, max
-    for endLength in (endLenMin, np.mean(endLenMin, endLenMax), endLenMax):
+    for endLength in (endLenMin, np.mean((endLenMin, endLenMax)), endLenMax):
         # Get the flattened transcript exon-wise end pieces across the genome
         # Re-using the code from getStrandedFeats()
         endsCov = 0
@@ -919,12 +919,8 @@ def getTransEndSensSpec(
             for refname in references:
                 refCounter += 1
                 clear_output()
-                print(
-                    'Processing transcript ends of length {}...{:.2%}'.format(
-                        endLength,
-                        refCounter / totalRefs
-                        )
-                    )
+                print('Processing transcript ends of length {}...'\
+                      ' ({:.2%})'.format(endLength, refCounter / totalRefs))
                 refEndPieces = []
                 # If not extracted before, initialize exons for this ref
                 if baselineData is None:
