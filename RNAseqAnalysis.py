@@ -14,9 +14,15 @@ from SNRanalysis import getStrandedFeats, getGeneLenToSNRs
 from SNRdetection import savePKL, loadPKL
 from IPython.display import clear_output
 
-expCovConc = 0
-expCovDisc = 0
+expCovByConcFeat = collections.defaultdict(lambda:collections.defaultdict(int))
 
+expectedExCov = 0
+covTransByStrdRef = collections.defaultdict(
+    lambda: collections.defaultdict(list)
+    )
+covExonsByStrdRef = collections.defaultdict(
+    lambda: collections.defaultdict(list)
+    )
 
 class NoncGene:
     """An object that stores information about a gene identified to be
@@ -47,7 +53,7 @@ class Transcript:
         self.geneID = geneID    # str, geneID of the gene the T belongs to
         self.start = start      # int, start position on the chromosome
         self.end = end          # int, end position on the chromosome
-        self.exons = exons      # list, [ (start, end) ] of child Es
+        self.exons = exons      # list, [ (start, end) ] of child Es; 0-based
         
     def __str__(self):
         # Displays the base, number of mismatches, and location
@@ -189,14 +195,11 @@ def getExpectedCoverage(
         The expected per-base coverage from the RNA-seq data.
     """
     
-    global expCovConc, expCovDisc
+    global expCovByConcFeat
     
     # Try to retrieve the value if already calculated in this session
-    if concordant and expCovConc != 0:
-        expected = expCovConc
-        return expected
-    if not concordant and expCovDisc != 0:
-        expected = expCovDisc
+    if expCovByConcFeat[concordant][baselineFeat] != 0:
+        expected = expCovByConcFeat[concordant][baselineFeat]
         return expected
     
     # In most cases, this should just load a file
@@ -208,23 +211,14 @@ def getExpectedCoverage(
     
     # Attach a pre-filtered bam file
     bam = pysam.AlignmentFile(bamfile, 'rb')
-    
-    # First, get the total (absolute) coverage by the reads on both strands in
-    #  the bam file in question
+
     totalCoverage = 0
-    for ref in bam.references:
-        print('Getting total coverage for reference {}'.format(ref))
-        totalCoverage += np.sum(
-            bam.count_coverage(ref, quality_threshold = 0),
-            dtype = 'int'
-            )
-    bam.close()
-    
-    # Get the total length of the feat that the SNRs come from
     totalLength = 0
+
+    # Get the total length of the feats and the total coverage over them
     for strd in (True, False):
         print(
-            'Scanning {}{}s for total length...'.format(
+            'Scanning {}{}s for total coverage and length...'.format(
                 '+' if strd else '-',
                 baselineFeat
                 )
@@ -232,15 +226,23 @@ def getExpectedCoverage(
         for feat in flatStrandedFeats[strd][baselineFeat]:
             # Note that pysam is 0-based; my vars are 1-based (like the gtf)
             totalLength += feat[2] - feat[1] + 1
+            totalCoverage += np.sum(
+                bam.count_coverage(
+                    contig = feat[0],
+                    start = feat[1] - 1,      # 1-based => 0-based
+                    stop = feat[2],
+                    quality_threshold = 0,
+                    read_callback = lambda r: r.is_reverse != strd
+                    ),
+                dtype = 'int'
+                )
+    bam.close()
     
     # Normalize the coverage by #SNRs, total coverage, and total length
     expected = totalCoverage / totalLength
     
     # Save the value for later use in this session
-    if concordant:
-        expCovConc = expected
-    else:
-        expCovDisc = expected    
+    expCovByConcFeat[concordant][baselineFeat] = expected
     
     return expected
 
@@ -735,7 +737,7 @@ def getNonCanCovGenes(
             [geneID] = trans.attributes['gene_id']
             # Save all transcripts (lite) on the same strand as the gene
             transcripts.append(
-                Transcript(geneID, trans0start, trans0end, exons)
+                Transcript(geneID, trans.seqid, trans0start, trans0end, exons)
                 )
             # Determine the transcripts's exon-wise end
             remaining = lastBP
@@ -833,15 +835,110 @@ def getNonCanCovGenes(
     savePKL(out_NonCanCovGenes, nonCanCovGenes)
     
     return nonCanCovGenes
-        
+
+
+def getBaselineData(out_db, bamfile):
+    """Function to obtain the baseline data as an input for calculation of
+    sensitivity, specificity, and accuracy. Note that here, only expressed
+    (i.e., with any coverage) transcripts are considered.
+    
+    Parameters
+    ----------
+    out_db : (str)
+        Path to the saved GTF/GFF database.
+    bamfile : (str)
+        Path to the (filtered) bam file.
+
+    Returns
+    -------
+    expectedExCov : float
+        Expected coverage across exons flattened from expressed transcripts.
+    coveredTranscripts : list
+        [ Transcript ] of transcripts with non-0 coverage
+    """
+    
+    global expectedExCov, covTransByStrdRef, covExonsByStrdRef
+    
+    # If done before, simply return the existing results; otherwise process
+    if expectedExCov != 0:
+        return expectedExCov, covTransByStrdRef, covExonsByStrdRef
+    
+    db = gffutils.FeatureDB(out_db, keep_order = True)
+    bam = pysam.AlignmentFile(bamfile, 'rb')
+    
+    references = bam.references
+    totalExCov = 0
+    totalExLen = 0
+    
+    for strd in (True, False):
+        for refname in references:
+            # Initiate the flattened exon list for this reference
+            for trans in db.features_of_type(
+                featuretype = 'transcript',
+                limit = (refname, 1, bam.get_reference_length(refname)),
+                strand = '+' if strd else '-'
+                ):
+                # Process this transcript only if it has ANY coverage
+                transCov = np.sum(
+                    bam.count_coverage(
+                        contig = trans.seqid,
+                        start = trans.start - 1,      # 1-based => 0-based
+                        stop = trans.end,
+                        quality_threshold = 0,
+                        read_callback = lambda r: r.is_reverse != strd
+                        )
+                    )
+                # Only transcripts with ANY coverage are considered here
+                if transCov == 0:
+                    continue
+                # Extract exons from the transcript, last-to-first
+                exons = sorted(
+                    [(e.start - 1, e.end) for e in db.children(
+                        trans,
+                        featuretype = 'exon'
+                        )],
+                    reverse = strd
+                    )
+                trans0start = trans.start - 1       # Conversion to 0-based
+                trans0end = trans.end               # Conversion to 0-based
+                [geneID] = trans.attributes['gene_id']
+                # Save this transcript to the list of covered transcripts
+                covTransByStrdRef[strd][refname].append(
+                    Transcript(geneID, trans0start, trans0end, exons)
+                    )
+                # Integrate these exons in the ref-wide flattened exon list
+                for exon in exons:
+                    covExonsByStrdRef[strd][refname] = integrateEnding(
+                        exon,
+                        covExonsByStrdRef[strd][refname]
+                        )
+            # Get the total coverage & length of this ref's exons for baseline
+            #  Note: only exons from transcripts w/ ANY coverage are considered
+            for ex in covExonsByStrdRef[strd][refname]:
+                totalExLen += ex[1] - ex[0]
+                totalExCov += np.sum(
+                    bam.count_coverage(
+                        contig = refname,
+                        start = ex[0],      # already 0-based
+                        stop = ex[1],
+                        quality_threshold = 0,
+                        read_callback = lambda r: r.is_reverse != strd
+                        ),
+                    dtype = 'int'
+                    )
+    
+    # Get the expected coverage
+    expectedExCov = totalExCov / totalExLen
+    
+    return expectedExCov, covTransByStrdRef, covExonsByStrdRef
+    
 
 def getTransEndSensSpec(
         out_db,
         bamfile,
         endLenMin = 50,
         endLenMax = 250,
-        results = {},
-        baselineData = None
+        results = {}
         ):
     """Function to provide data for a ROC curve for various transcript end
     lengths.
@@ -859,20 +956,15 @@ def getTransEndSensSpec(
         The minimal length of exon-wise transcript end to consider.
         The default is 150.
     results : (dict)
-        { endLen : (sensitivity, specificity) }. The default is {}.
-    baselineData : (dict), optional
-        { totalExCov, totalExNonCovBP, exonsByStrdRef }, where
-        exonsByStrdRef = { ref : [ (start, end) ] }. The default is None.
+        { endLen : (sensitivity, specificity, accuracy) }. The default is {}.
 
     Returns
     -------
     results : (dict)
-        { endLen : (sensitivity, specificity) }
-    baselineData : (dict), optional
-        { totalExCov, totalExNonCovBP, exonsByStrdRef }, where
-        exonsByStrdRef = { ref : [ (start, end) ] }. The default is None.
+        { endLen : (sensitivity, specificity, accuracy) }
     """
     # Notes:
+    #
     # Sensitivity = percentage of total exonic coverage captured by the
     #  transcript ends of a given length
     #  - Get total read coverage of all flattened exons
@@ -883,44 +975,50 @@ def getTransEndSensSpec(
     #  - Sum the number of flattened exon bases without coverage
     #  - Sum the number of flattened exon bases that do not overlap ends
     #  = NON-ENDS / NON-COVERAGE
+    # 
     # Do this for multiple end lengths & make ROC
     # !!! Only consider genes with coverage (expressed)!
+    #
+    # In order to get accuracy, the following is needed: TP, FP, TN, FN
+    # This is binarized wrt/ the expected coverage: >= / <
+    # This information also can be used to calculate Sens and Spec
+    #
+    # The 
     
-    # Initialize variables as needed
-    if baselineData is None:
-        totalExCov = 0
-        totalExNonCovBP = 0
-        exonsByStrdRef = {}
-    else:
-        totalExCov = baselineData[0]
-        totalExNonCovBP = baselineData[1]
-        exonsByStrdRef = baselineData[2]
-        
-    db = gffutils.FeatureDB(out_db, keep_order = True)
+    # Get the baseline variables
+    expectedExCov, covTransByStrdRef, covExonsByStrdRef = getBaselineData(
+        out_db,
+        bamfile
+        )
+    
     bam = pysam.AlignmentFile(bamfile, 'rb')
     references = bam.references
     
+    # Initiate progress tracking
     refCounter = 0
-    totalRefs = len(references) * 2     # For each strand
-    # Do the end measurements for each potential end lengths min, mid, max
-    for endLength in (endLenMin, np.mean((endLenMin, endLenMax)), endLenMax):
-        # Get the flattened transcript exon-wise end pieces across the genome
-        # Re-using the code from getStrandedFeats()
-        endsCov = 0
-        nonCovStartBP = 0
+    totalRefs = len(references) * 6     # For each strand (2) and length (3)
+    # Do the end measurements for each potential end lengths min, mid, max to
+    #  get the flattened transcript exon-wise end pieces across each ref
+    for endLength in (
+            endLenMin,
+            np.mean((endLenMin, endLenMax), dtype = int),
+            endLenMax
+            ):
+        # "POSITIVE" ~ Inside exon-wise transcript ends
+        TP = 0  # Number of bp >= exp in exon-wise ends
+        FP = 0  # Number of bp < exp in exon-wise ends
+        # "NEGATIVE" ~ Outside exon-wise transcript ends
+        TN = 0  # Number of bp < exp outside exon-wise ends
+        FN = 0  # Number of bp >= exp outside exon-wise ends
         # Go over each strand separately
         for strd in (True, False):
-            # Initialize exons by ref for each strand
-            if baselineData is None:
-                exonsByRef = {}
-            else:
-                exonsByRef = exonsByStrdRef[strd]
             # Work for each reference separately
             for refname in references:
+                # Track progress & announce in the output
                 refCounter += 1
-                clear_output()
                 print('Processing transcript ends of length {}...'\
                       ' ({:.2%})'.format(endLength, refCounter / totalRefs))
+                clear_output(wait = True)
                 refEndPieces = []
                 # If not extracted before, initialize exons for this ref
                 if baselineData is None:
@@ -1038,4 +1136,4 @@ def getTransEndSensSpec(
             )
     bam.close()
 
-    return results, baselineData
+    return results
