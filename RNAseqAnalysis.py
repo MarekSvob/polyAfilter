@@ -16,6 +16,7 @@ from IPython.display import clear_output
 
 expCovByConcFeat = collections.defaultdict(lambda:collections.defaultdict(int))
 
+expectedExCov = 0
 covTransByStrdRef = collections.defaultdict(
     lambda: collections.defaultdict(list)
     )
@@ -856,16 +857,20 @@ def getBaselineData(out_db, bamfile):
         { strd : { ref : [ exon ] } } flattened from transcripts above.
     """
     
-    global covTransByStrdRef, covExonsByStrdRef
+    global covTransByStrdRef, covExonsByStrdRef, expectedExCov
     
     # If done before, simply return the existing results; otherwise process
-    if len(covTransByStrdRef) != 0 and len(covExonsByStrdRef) != 0:
-        return covTransByStrdRef, covExonsByStrdRef
+    if expectedExCov != 0:
+        return covTransByStrdRef, covExonsByStrdRef, expectedExCov
+    
+    print('Getting baseline data...')
     
     db = gffutils.FeatureDB(out_db, keep_order = True)
     bam = pysam.AlignmentFile(bamfile, 'rb')
     
     references = bam.references
+    totalExCov = 0
+    totalExLen = 0
     
     for strd in (True, False):
         for refname in references:
@@ -909,8 +914,25 @@ def getBaselineData(out_db, bamfile):
                         exon,
                         covExonsByStrdRef[strd][refname]
                         )
+            # Get the total coverage & length of this ref's exons for baseline
+            #  Note: only exons from transcripts w/ ANY coverage are considered
+            for ex in covExonsByStrdRef[strd][refname]:
+                totalExLen += ex[1] - ex[0]
+                totalExCov += np.sum(
+                    bam.count_coverage(
+                        contig = refname,
+                        start = ex[0],      # already 0-based
+                        stop = ex[1],
+                        quality_threshold = 0,
+                        read_callback = lambda r: r.is_reverse != strd
+                        ),
+                    dtype = 'int'
+                    )
+
+    # Get the expected coverage
+    expectedExCov = totalExCov / totalExLen
     
-    return covTransByStrdRef, covExonsByStrdRef
+    return covTransByStrdRef, covExonsByStrdRef, expectedExCov
     
 
 def getTransEndSensSpec(
@@ -963,9 +985,11 @@ def getTransEndSensSpec(
     # This is binarized wrt/ the expected coverage: >= / <
     # This information also can be used to calculate Sens and Spec
 
-    
     # Get the baseline variables
-    covTransByStrdRef, covExonsByStrdRef = getBaselineData(out_db, bamfile)
+    covTransByStrdRef, covExonsByStrdRef, expectedExCov = getBaselineData(
+        out_db,
+        bamfile
+        )
     
     bam = pysam.AlignmentFile(bamfile, 'rb')
     references = bam.references
@@ -1033,8 +1057,8 @@ def getTransEndSensSpec(
                             ),
                         axis = 0
                         )
-                    TP += np.sum(endsCov)
-                    FP += np.count_nonzero(endsCov == 0)
+                    TP += np.count_nonzero(endsCov >= expectedExCov)
+                    FP += np.count_nonzero(endsCov < expectedExCov)
                 # Remove the portions of flattened exons overlapped by
                 #  endpieces and save as starts
                 refStarts = removeOverlaps(
@@ -1053,8 +1077,8 @@ def getTransEndSensSpec(
                             ),
                         axis = 0
                         )
-                    FN += np.sum(startsCov)
-                    TN += np.count_nonzero(startsCov == 0)
+                    FN += np.count_nonzero(startsCov >= expectedExCov)
+                    TN += np.count_nonzero(startsCov < expectedExCov)
                 
         # Save the results for each length
         results[endLength] = (
