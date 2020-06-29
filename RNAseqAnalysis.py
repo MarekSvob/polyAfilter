@@ -1115,7 +1115,7 @@ def getTransEndROC(
     #  as an existing adjacent value in the opposite direction.
     
     # Initiate the alternating indicator of looking above or below
-    lookAbove = True
+    lookAbove = False
     # Initiate the indicators of having looked at both optLen+/-1
     checkedJustAboveBelow = [False, False]
     # Initiate the oldOptLen at a value that can't be true before the 1st loop
@@ -1127,10 +1127,14 @@ def getTransEndROC(
         # Get the current most optimal endLen
         optLen = max(checkedLens, key = lambda l: results[l][0]*results[l][1])
         print('The current optimal end length is {}.'.format(optLen))
-        # If the new opt is different from the old, reset the indicators
+        # If the new opt is different from the old, reset the indicators but
+        #  don't change the direction in which you're looking
         if optLen != oldOptLen:
             checkedJustAboveBelow = [False, False]
             oldOptLen = optLen
+        # If the optimum did not change, flip the direction bool to look around
+        else:
+            lookAbove = not lookAbove 
         # Get the index of the 
         i = checkedLens.index(optLen)
         # Get the index of the adjacent endLen
@@ -1159,9 +1163,7 @@ def getTransEndROC(
                 bamfile,
                 covTransByStrdRef,
                 covExonsByStrdRef
-                )
-        # Flip the bool before the next iteration to alter
-        lookAbove = not lookAbove  
+                ) 
         
     savePKL(out_TransEndROC, results)
     
