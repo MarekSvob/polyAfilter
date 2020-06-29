@@ -916,34 +916,35 @@ def getBaselineData(out_db, bamfile):
     
 
 def getTransEndSensSpec(
-        out_db,
+        endLength,
         bamfile,
-        endLenMin = 50,
-        endLenMax = 250,
-        results = {}
+        covTransByStrdRef,
+        covExonsByStrdRef
         ):
     """Function to provide data for a ROC curve for various transcript end
     lengths.
     
     Parameters
     ----------
-    out_db : (str)
-        Path to the saved GTF/GFF database.
+    endLength : (int)
+        The length of exon-wise transcript ends to consider.
     bamfile : (str)
         Path to the (filtered) bam file.
-    endLenMin : (int), optional
-        The minimal length of exon-wise transcript end to consider.
-        The default is 50.
-    endLenMax : (int), optional
-        The minimal length of exon-wise transcript end to consider.
-        The default is 150.
-    results : (dict)
-        { endLen : (sensitivity, specificity, accuracy) }. The default is {}.
+    covTransByStrdRef : dict
+        { strd : { ref : [ Transcript ] } } of transcripts with non-0 coverage.
+    covExonsByStrdRef : dict
+        { strd : { ref : [ exon ] } } flattened from transcripts above.
 
     Returns
     -------
-    results : (dict)
-        { endLen : (sensitivity, specificity, accuracy) }
+    sensitivity : (float)
+        Proportion of total exonic coverage captured by the transcript ends of
+        a given length: TP / (TP + FN)
+    specificity : (float)
+        Proportion of non-covered exon bps not overlapped by transcript ends:
+        TN / (TN + FP)
+    accuracy : (float)
+        (TN + TP) / (TN + TP + FN + FP)
     """
     # Notes:
     #
@@ -964,105 +965,204 @@ def getTransEndSensSpec(
     # In order to get accuracy, the following is needed: TP, FP, TN, FN
     # This is binarized wrt/ the expected coverage: >= / <
     # This information also can be used to calculate Sens and Spec
-
-    # Get the baseline variables
-    covTransByStrdRef, covExonsByStrdRef = getBaselineData(out_db, bamfile)
+    
+    print('Checking transcript ends of length {}...'.format(endLength))
     
     bam = pysam.AlignmentFile(bamfile, 'rb')
     references = bam.references
-    
-    # Initiate progress tracking
-    refCounter = 0
-    totalRefs = len(references) * 6     # For each strand (2) and length (3)
-    # Do the end measurements for each potential end lengths min, mid, max to
-    #  get the flattened transcript exon-wise end pieces across each ref
-    for endLength in (
-            endLenMin,
-            np.mean((endLenMin, endLenMax), dtype = int),
-            endLenMax
-            ):
-        # "POSITIVE" ~ Inside exon-wise transcript ends
-        TP = 0  # Total coverage in exon-wise ends
-        FP = 0  # Number of bp with 0 coverage in exon-wise ends
-        # "NEGATIVE" ~ Outside exon-wise transcript ends
-        TN = 0  # Total coverage in outside exon-wise ends
-        FN = 0  # Number of bp with 0 coverage outside exon-wise ends
-        # Go over each strand separately
-        for strd in (True, False):
-            # Work for each reference separately
-            for refname in references:
-                # Track progress & announce in the output
-                refCounter += 1
-                print('Processing transcript ends of length {}...'\
-                      ' ({:.2%})'.format(endLength, refCounter / totalRefs))
-                clear_output(wait = True)
-                # Initiate the flattened exon-wise transcript end pieces for
-                #  this reference
-                refEndPieces = []
-                # Iterate through previously found transcripts to extract &
-                #  save flattened exon-wise endpieces of given length for each
-                for Trans in covTransByStrdRef[strd][refname]:
-                    # Initiate how much is left to progress by
-                    remaining = endLength
-                    # For each exon, check whether it is longer than the
-                    #  remaining endLength
-                    for exon in Trans.exons:
-                        exLen = exon[1] - exon[0]
-                        # If not, add the entire exon & decrease the remainder
-                        if exLen < remaining:
-                            refEndPieces = integrateEnding(exon, refEndPieces)
-                            remaining -= exLen
-                        # Otherwise add only the remaining piece of the exon
-                        else:
-                            refEndPieces = integrateEnding(
-                                (exon[1] - remaining, exon[1]) if strd \
-                                    else (exon[0], exon[0] + remaining),
-                                refEndPieces
-                                )
-                            break
-                
-                # For each reference (on each strand), extract and add the exon
-                #  coverage and non-covBP for the exon-wise end pieces
-                for refEndpiece in refEndPieces:
-                    endsCov = np.sum(
-                        bam.count_coverage(
-                            contig = refname,
-                            start = refEndpiece[0],      # already 0-based
-                            stop = refEndpiece[1],
-                            quality_threshold = 0,
-                            read_callback = lambda r: r.is_reverse != strd
-                            ),
-                        axis = 0
-                        )
-                    TP += np.sum(endsCov)
-                    FP += np.count_nonzero(endsCov == 0)
-                # Remove the portions of flattened exons overlapped by
-                #  endpieces and save as starts
-                refStarts = removeOverlaps(
-                    covExonsByStrdRef[strd][refname],
-                    refEndPieces
-                    )
-                # Now get the coverage and non-covered BPs for the starts
-                for refStart in refStarts:
-                    startsCov = np.sum(
-                        bam.count_coverage(
-                            contig = refname,
-                            start = refStart[0],      # already 0-based
-                            stop = refStart[1],
-                            quality_threshold = 0,
-                            read_callback = lambda r: r.is_reverse != strd
-                            ),
-                        axis = 0
-                        )
-                    FN += np.sum(startsCov)
-                    TN += np.count_nonzero(startsCov == 0)
-                
-        # Save the results for each length
-        results[endLength] = (
-            TP / (TP + FN),                     # Sensitivity
-            TN / (TN + FP),                     # Specificity
-            (TN + TP) / (TN + TP + FN + FP)     # Accuracy
-            )
-    bam.close()
 
+    # "POSITIVE" ~ Inside exon-wise transcript ends
+    TP = 0  # Total coverage in exon-wise ends
+    FP = 0  # Number of bp with 0 coverage in exon-wise ends
+    # "NEGATIVE" ~ Outside exon-wise transcript ends
+    TN = 0  # Total coverage in outside exon-wise ends
+    FN = 0  # Number of bp with 0 coverage outside exon-wise ends
+    # Go over each strand separately
+    for strd in (True, False):
+        # Work for each reference separately
+        for refname in references:
+            # Initiate the flattened exon-wise transcript end pieces for
+            #  this reference
+            refEndPieces = []
+            # Iterate through previously found transcripts to extract &
+            #  save flattened exon-wise endpieces of given length for each
+            for Trans in covTransByStrdRef[strd][refname]:
+                # Initiate how much is left to progress by
+                remaining = int(endLength)
+                # For each exon, check whether it is longer than the
+                #  remaining endLength
+                for exon in Trans.exons:
+                    exLen = exon[1] - exon[0]
+                    # If not, add the entire exon & decrease the remainder
+                    if exLen < remaining:
+                        refEndPieces = integrateEnding(exon, refEndPieces)
+                        remaining -= exLen
+                    # Otherwise add only the remaining piece of the exon
+                    else:
+                        refEndPieces = integrateEnding(
+                            (exon[1] - remaining, exon[1]) if strd \
+                                else (exon[0], exon[0] + remaining),
+                            refEndPieces
+                            )
+                        break
+            
+            # For each reference (on each strand), extract and add the exon
+            #  coverage and non-covBP for the exon-wise end pieces
+            for refEndpiece in refEndPieces:
+                endsCov = np.sum(
+                    bam.count_coverage(
+                        contig = refname,
+                        start = refEndpiece[0],      # already 0-based
+                        stop = refEndpiece[1],
+                        quality_threshold = 0,
+                        read_callback = lambda r: r.is_reverse != strd
+                        ),
+                    axis = 0
+                    )
+                TP += np.sum(endsCov)
+                FP += np.count_nonzero(endsCov == 0)
+            # Remove the portions of flattened exons overlapped by
+            #  endpieces and save as starts
+            refStarts = removeOverlaps(
+                covExonsByStrdRef[strd][refname],
+                refEndPieces
+                )
+            # Now get the coverage and non-covered BPs for the starts
+            for refStart in refStarts:
+                startsCov = np.sum(
+                    bam.count_coverage(
+                        contig = refname,
+                        start = refStart[0],      # already 0-based
+                        stop = refStart[1],
+                        quality_threshold = 0,
+                        read_callback = lambda r: r.is_reverse != strd
+                        ),
+                    axis = 0
+                    )
+                FN += np.sum(startsCov)
+                TN += np.count_nonzero(startsCov == 0)
+            
+    bam.close()
+    # Save the results
+    sensitivity = TP / (TP + FN)
+    specificity = TN / (TN + FP)
+    accuracy = (TN + TP) / (TN + TP + FN + FP)
+
+    return sensitivity, specificity, accuracy
+
+
+def getTransEndROC(
+        out_TransEndROC,
+        out_db,
+        bamfile,
+        endLenMin,
+        endLenMax,
+        results = {}
+        ):
+    """Gradient descent-like wrapper funciton around getTransEndSensSpec() to
+    manage result generation & collection. This function maximizes the
+    Sensitivity * Specificity product across exon-wise transcript endLengths.
+    This function assumes that there is only one such local maximum. (!)
+    Also note that while endLenMin and endLenMax serve the initiate the search,
+    they are not binding and this algorithm may look outside these boundaries.
+
+    Parameters
+    ----------
+    out_transROC : (str)
+        Path to the saved output, if done before.
+    out_db : (str)
+        Path to the saved GTF/GFF database.
+    bamfile : (str)
+        Path to the (filtered) bam file.
+    endLenMin : (int)
+        The minimal estimated length of exon-wise transcript ends to consider.
+    endLenMax : (int)
+        The maximum estimated length of exon-wise transcript ends to consider.
+    results : (dict), optional
+        { endLen : ( Sensitivity, Specificity, Accuracy ) }. The default is {}.
+
+    Returns
+    -------
+    results : (dict)
+        { endLen : ( Sensitivity, Specificity, Accuracy ) }
+    """
+    
+    # If the file already exists, simply load
+    if os.path.isfile(out_TransEndROC):
+        results = loadPKL(out_TransEndROC)
+        return results
+    
+    # Get the baseline variables
+    covTransByStrdRef, covExonsByStrdRef = getBaselineData(out_db, bamfile)
+    
+    # Start with min, mid, and max and then apply the repetitive algorithm
+    #  until 'covergence'
+    for endLen in (
+        endLenMin,
+        np.mean((endLenMin, endLenMax), dtype = int),
+        endLenMax
+        ):
+        results[endLen] = getTransEndSensSpec(
+            endLen,
+            bamfile,
+            covTransByStrdRef,
+            covExonsByStrdRef
+            )
+        
+    # Always look at the midpoint between the endLen with the largest
+    #  Sens*Spec product and an adjacent endLen, alternating above or below.
+    #  If looking above the longest or below the shortest endLen, look as far
+    #  as an existing adjacent value in the opposite direction.
+    
+    # Initiate the alternating indicator of looking above or below
+    lookAbove = True
+    # Initiate the indicators of having looked at both optLen+/-1
+    checkedJustAboveBelow = [False, False]
+    # Initiate the oldOptLen at a value that can't be true before the 1st loop
+    oldOptLen = -1
+    # Run the while loop until both optLen+/-1 have been checked and neither
+    #  is better than optLen ~ the optimum has been found with max resolution
+    while not all(checkedJustAboveBelow):
+        checkedLens = sorted(results)
+        # Get the current most optimal endLen
+        optLen = max(checkedLens, key = lambda l: results[l][0]*results[l][1])
+        print('The current optimal end length is {}.'.format(optLen))
+        # If the new opt is different from the old, reset the indicators
+        if optLen != oldOptLen:
+            checkedJustAboveBelow = [False, False]
+            oldOptLen = optLen
+        # Get the index of the 
+        i = checkedLens.index(optLen)
+        # Get the index of the adjacent endLen
+        j = i + (-1, 1)[lookAbove]
+        
+        # If the adjacent endLen does not exist in the given direction, look
+        #  as far as an existing adjacent value in the opposite direction
+        if j in (-1, len(checkedLens)):
+            lenToC = optLen + (
+                optLen - checkedLens[i + (-1, 1)[not lookAbove]]
+                )
+        # Otherwise just look between the optimal & adjacent endLen
+        else:
+            lenToC = np.mean((optLen, checkedLens[j]), dtype = int)
+        
+        # If this length has already been checked, this must be either optLen
+        #  itself (if lookAbove = True, which means that optLen+1 must have
+        #  been checked as well, as that must be the checkedLens[j])
+        #  or optLen-1 (if lookAbove = False), so don't check it again & only
+        #  mark that an immediately adjacent value has already been checked
+        if lenToC in checkedLens:
+            checkedJustAboveBelow[lookAbove] = True
+        else:
+            results[lenToC] = getTransEndSensSpec(
+                lenToC,
+                bamfile,
+                covTransByStrdRef,
+                covExonsByStrdRef
+                )
+        # Flip the bool before the next iteration to alter
+        lookAbove = not lookAbove  
+        
+    savePKL(out_TransEndROC, results)
+    
     return results
