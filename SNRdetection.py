@@ -9,7 +9,7 @@ Created on Fri Mar 27 08:42:02 2020
 import os
 import time
 import collections
-import pickle
+import dill
 import gffutils
 import tempfile
 import shutil
@@ -495,7 +495,7 @@ def savePKL(loc, var):
     """
 
     with open(loc, 'wb') as f:
-        pickle.dump(var, f)
+        dill.dump(var, f)
         
     print('File saved to {}'.format(loc))
      
@@ -539,9 +539,9 @@ def loadPKL(loc):
     var : (any)
         Any class variable
     """
-
+    
     with open(loc, 'rb') as f:
-        var = pickle.load(f)
+        var = dill.load(f)
     print('File loaded from {}'.format(loc))
     
     return var
