@@ -1283,18 +1283,18 @@ def getSNREndROC(
     #  of them in order from largest to smallest exactly once. As an added
     #  benefit, the function can coverge as soon as J statistic starts
     #  decreasing, as only one local maximum is assumed. (!)
-    # Start with the longest length, whose data which will be included in all
+    # Start with the longest length, whose data will be included in all
     #  subsequent calculations. Always extract only the newly added stretches
     #  and add the coverage data (TP/FP/TN/FN) to the already existing to save
     #  processing resources.
-    for length, SNRs in lenToSNRs.items():
+    for length in sorted(lenToSNRs.keys(), reverse = True):
         print('Checking coverage for SNRs of length {}+...'.format(length))
         # Work by strand and reference
         for strd in (True, False):
             for refName in references:
                 SNRpieces = []
                 # Get & flatten the SNRs' pieces at this length/strd/ref
-                for SNR in SNRs:
+                for SNR in lenToSNRs[length]:
                     # Filter the SNRs by strd and ref
                     if SNR.strand == strd and SNR.record == refName:
                         start = SNR.start - optEndLen if strd else SNR.end
