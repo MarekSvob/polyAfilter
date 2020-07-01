@@ -527,7 +527,7 @@ def getCovPerTran(
     return normCov
 
 
-def integrateEnding(nEnd, oldEnds):
+def integrateEnding(nEnding, oldEndings):
     """Helper function to merge overlapping endings, similar to integrateFeats. 
 
     Parameters
@@ -543,41 +543,41 @@ def integrateEnding(nEnd, oldEnds):
         [ ( start, end ) ] such that the endings do not overlap.
     """
     
+    nStart = nEnding[0]
+    nEnd = nEnding[1]
     # Go over the list of previously saved endings, check for overlap and save
     #  all the overlaps found in a list.
     overlaps = []
-    for oEnd in oldEnds:
+    for oStart, oEnd in oldEndings:
         # If (the new End's beginning is within the old End)
         #  or (the new End's end is within the old End)
         #  or (the new End spans the old End)
         #  ), add old End to the overlaps list
-        if (nEnd[0] >= oEnd[0] and nEnd[0] <= oEnd[1]) \
-            or (nEnd[1] >= oEnd[0] and nEnd[1] <= oEnd[1]) \
-            or (nEnd[0] < oEnd[0] and nEnd[1] > oEnd[1]):
-                overlaps.append(oEnd)
-    #  If overlaps have been found, merge with the new one
+        # Note that start = end constitutes an adjacency (not an overlap), but
+        #  even then a merge is desirable, nevertheless.
+        if (nStart >= oStart and nStart <= oEnd) \
+            or (nEnd >= oStart and nEnd <= oEnd) \
+            or (nStart < oStart and nEnd > oEnd):
+                overlaps.append((oStart, oEnd))
+    # If overlaps have been found, modify the nStart and nEnd, while removing
+    #  the old overlapping endings from the master list
+    #  (which can't be edited in the loop above)
     if overlaps != []:
-        # Initialize the start & end of the merged ending using the new End
-        #  (not in the overlaps list)
-        start = nEnd[0]; end = nEnd[1]
-        # Go over all the overlaps & update the start & end as necessary
-        for e in overlaps:
-            if e[0] < start:
-                start = e[0]
-            if e[1] > end:
-                end = e[1]
-            # When done considering this ending, remove it from the master list
-            oldEnds.remove(e)
-        # When done, add the new merged ending to the list
-        oldEnds.append((start, end))
-    # If no overlaps have been found, simply add the new ending
-    else:
-        oldEnds.append(nEnd)
+        # Go over all the overlaps & update the new start & end as necessary
+        for eStart, eEnd in overlaps:
+            if eStart < nStart:
+                nStart = eStart
+            if eEnd > nEnd:
+                nEnd = eEnd
+            # When done considering the oEnding, remove it from the master list
+            oldEndings.remove((eStart, eEnd))
+    # Add the new ending (merged, if necessary) to the list
+    oldEndings.append((nStart, nEnd))
     
-    return sorted(oldEnds)
+    return sorted(oldEndings)
 
 
-def removeOverlaps(SNRendings, Tendings):
+def removeOverlaps(SNRendings, tEndings):
     """Helper function to remove portions of SNRendings (exons) that are
     overlapped by Tendings (endpieces). All 0-based.
 
@@ -596,30 +596,34 @@ def removeOverlaps(SNRendings, Tendings):
 
     newEndings = []
     for SNRe in SNRendings:
-        start = SNRe[0]
-        end = SNRe[1]
+        # Initiate the start & end of the pieces to be preserved
+        SNRstart = SNRe[0]
+        SNRend = SNRe[1]
         # Look for any overlap with Tendings
-        for Te in Tendings:
+        for tStart, tEnd in tEndings:
             # Treat each case of overlap separately:
             # Complete overlap / both start & end within
-            if start >= Te[0] and end <= Te[1]:
+            if SNRstart >= tStart and SNRend <= tEnd:
                 break
             # Shorten start if only start within
-            elif start >= Te[0] and start <= Te[1]:
-                start = Te[1]
+            elif SNRstart >= tStart and SNRstart < tEnd:
+                SNRstart = tEnd
             # Shorten end if only end within
-            elif end >= Te[0] and end <= Te[1]:
-                end = Te[0]
+            elif SNRend > tStart and SNRend <= tEnd:
+                SNRend = tStart
             # If a Tending is entirely within an SNRending, treat recursively,
             #  with the two overhangs each as a new separate SNRending
-            elif start < Te[0] and end > Te[1]:
+            elif SNRstart < tStart and SNRend > tEnd:
                 newEndings.extend(
-                    removeOverlaps([(start, Te[0]), (Te[1], end)], Tendings)
+                    removeOverlaps(
+                        [(SNRstart, tStart), (tEnd, SNRend)],
+                        tEndings
+                        )
                     )
                 break
-        # If none found, just add as is
+        # If break was encountered, add the current start & end
         else:
-            newEndings.append((start, end))
+            newEndings.append((SNRstart, SNRend))
 
     return sorted(newEndings)
 
@@ -1219,16 +1223,14 @@ def getOverlaps(SNRpieces, exons):
     # Test each possible pair of SNRpieces & exons
     for SNRstart, SNRend in SNRpieces:
         for exonStart, exonEnd in exons:
-            # When SNRstart is within the exon
-            if SNRstart >= exonStart and SNRstart <= exonEnd:
-                # When the SNRend is also within the exon, add the SNR end
-                if SNRend >= exonStart and SNRend <= exonEnd:
-                    overlaps.append((SNRstart, SNRend))
-                # Otherwise only add up to exonEnd
-                else:
-                    overlaps.append((SNRstart, exonEnd))
+            # When the entire SNR piece is within the exon, add the SNR piece
+            if SNRstart >= exonStart and SNRend <= exonEnd:
+                overlaps.append((SNRstart, SNRend))
+            # If only SNRstart is within the exon, add up to exonEnd
+            elif SNRstart >= exonStart and SNRstart < exonEnd:
+                overlaps.append((SNRstart, exonEnd))
             # If only SNRend is within the exon, add starting with exonStart
-            if SNRend >= exonStart and SNRend <= exonEnd:
+            elif SNRend > exonStart and SNRend <= exonEnd:
                 overlaps.append((exonStart, SNRend))
             # If the exon is entirely overhung by the SNRpiece, add the exon
             elif SNRstart < exonStart and SNRend > exonEnd:
@@ -1287,7 +1289,7 @@ def getSNREndROC(
     #  subsequent calculations. Always extract only the newly added stretches
     #  and add the coverage data (TP/FP/TN/FN) to the already existing to save
     #  processing resources.
-    for length in sorted(lenToSNRs.keys(), reverse = True):
+    for length in sorted(lenToSNRs, reverse = True):
         print('Checking coverage for SNRs of length {}+...'.format(length))
         # Work by strand and reference
         for strd in (True, False):
