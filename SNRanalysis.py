@@ -340,10 +340,14 @@ def flattenIntervals(intervals):
         [ (start, end) ]
     """
     
+    # Initialize the list of merged intervals
+    flat = []
+    # If the list is empty, return
+    if intervals == []:
+        return flat
     # Sort the intervals by start
     intervals.sort(key = lambda interval: interval[0])
-    # Initialize the list of merged intervals and the first 'current' interval
-    flat = []
+    # Initialize the first 'current' interval
     currentStart, currentEnd = intervals[0]
     for iStart, iEnd in intervals[1:]:
         # If the new interval overlaps the existing, merge by updating the end.
@@ -384,6 +388,9 @@ def getOverlaps(aIntervals, bIntervals):
     bIntervals.sort(key = lambda interval: interval[0])
     # Initialize the output and bInt index, and extract the first bInt info
     overlaps = []
+    # If bIntervals is empty, return
+    if bIntervals == []:
+        return overlaps
     bI = 0
     bStart, bEnd = bIntervals[bI]
     # Test each possible pair of bIntervals & bIntervals in linear time
@@ -450,6 +457,9 @@ def removeOverlaps(aIntervals, bIntervals):
     # Sort the two lists to be in the ascending order
     aIntervals.sort(key = lambda interval: interval[0])
     bIntervals.sort(key = lambda interval: interval[0])
+    # If bIntervals is empty, return aIntervals as is, sorted
+    if bIntervals == []:
+        return aIntervals
     # Initialize the output and bInt index, and extract the first bInt info
     nonOverlaps = []
     bI = 0
