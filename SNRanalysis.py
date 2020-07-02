@@ -184,7 +184,7 @@ def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
                 / ( (1-pBase) * pBase**int(k) * (1-pBase) \
                    + (1-pComp) * pComp**int(k) * (1-pComp) )
             )
-    table_data = [polyLen,obs,oe]
+    table_data = [polyLen, obs, oe]
     # Construct the df with the desired column names & types
     df = pd.DataFrame(data = pd.DataFrame(data = table_data).T)
     df.columns = ('SNR Length','Observed', 'O/E')
@@ -325,66 +325,188 @@ def SNRlabelProps(lenToFeats, exclusivePairs = pairs, other = 'Exon'):
     return df_p
 
 
-def integrateFeat(nFeat, oldFeats):
-    """Helper function to merge overlapping feats using the simplified
-    peak-merging strategy from Biostats Final Project. Note that GFF features
-    are 1-based, closed intervals.
+def flattenIntervals(intervals):
+    """Improved helper function to flatten a list of overlapping intervals in
+    linear time. Note that this requires 0-based coordinates.
 
     Parameters
     ----------
-    nFeat : (tuple)
-        ( ref, start, end )
-    oldFeats : (list)
-        [ ( ref, start, end ) ]
+    intervals : (list)
+        [ (start, end) ]
 
     Returns
     -------
-    oldFeats : (list)
-        [ ( ref, start, end ) ]
+    flat : (list)
+        [ (start, end) ]
     """
     
-    # Go over the list of previously saved feats, check for overlap on the same
-    #  ref and save all the overlaps found in a list.
-    overlaps = []
-    for oFeat in oldFeats:
-        # If the ref is the same and (
-        #  (the new Feat's beginning is within the old Feat)
-        #  or (the new Feat's end is within the oldFeat)
-        #  or (the newFeat spans the oldFeat)
-        #  ), add old Feat to the overlaps list
-        if nFeat[0] == oFeat[0] and (
-            (nFeat[1] >= oFeat[1] and nFeat[1] <= oFeat[2]) \
-            or (nFeat[2] >= oFeat[1] and nFeat[2] <= oFeat[2]) \
-            or (nFeat[1] < oFeat[1] and nFeat[2] > oFeat[2])
-            ):
-            overlaps.append(oFeat)
-    #  If overlaps have been found, merge with the new one
-    if overlaps != []:
-        # Initialize the start & end of the merged feature
-        #  using the new Feat (not in the overlaps list)
-        start = nFeat[1]; end = nFeat[2]
-        # Go over all the overlaps & update the start & end of
-        #  the merged feature as necessary
-        for ft in overlaps:
-            if ft[1] < start:
-                start = ft[1]
-            if ft[2] > end:
-                end = ft[2]
-            # When done considering this feature, remove it
-            #  from the master list
-            oldFeats.remove(ft)
-        # When done, add the new merged feature to the list
-        oldFeats.append((nFeat[0], start, end))
-    # If no overlaps have been found, simply add the new feature
-    else:
-        oldFeats.append(nFeat)
+    # Sort the intervals by start
+    intervals.sort(key = lambda interval: interval[0])
+    # Initialize the list of merged intervals and the first 'current' interval
+    flat = []
+    currentStart, currentEnd = intervals[0]
+    for iStart, iEnd in intervals[1:]:
+        # If the new interval overlaps the existing, merge by updating the end.
+        # Note that when iStart = currentEnd, this is technically an adjacency
+        #  (not overlap) but even then a merge is desirable, nevertheless.
+        if iStart >= currentStart and iStart <= currentEnd:
+            currentEnd = max(iEnd, currentEnd)
+        # Otherwise add the previous (no longer overlapped) merged interval
+        #  into the list and create a new 'current' interval.
+        else:
+            flat.append((currentStart, currentEnd))
+            currentStart = iStart
+            currentEnd = iEnd
+        
+    return flat
+
+
+def getOverlaps(aIntervals, bIntervals):
+    """Helper function to get the mutual overlaps between two lists of
+    intervals in linear time. Note that this function assumes flattened
+    (internally non-overlapping) 0-based intervals.
     
-    return oldFeats
+    Parameters
+    ----------
+    aIntervals : (list)
+        [ (start, end) ]
+    bIntervals : (list)
+        [ (start, end) ]
+
+    Returns
+    -------
+    overlaps : (list)
+        [ (start, end) ]
+    """
+    
+    # Sort the two lists to be in the ascending order
+    aIntervals.sort(key = lambda interval: interval[0])
+    bIntervals.sort(key = lambda interval: interval[0])
+    # Initialize the output and bInt index, and extract the first bInt info
+    overlaps = []
+    bI = 0
+    bStart, bEnd = bIntervals[bI]
+    # Test each possible pair of bIntervals & bIntervals in linear time
+    for aStart, aEnd in aIntervals:
+        # For this given aInt, keep going over the bIntervals as long as they
+        #  do not occur after the aInt, including when bStart = aEnd (adjacent)
+        #  once the bInterval occurs after the aInt, go to next aInt
+        while bStart < aEnd:
+            # If the bInterval is entirely before the aInt, go to the next one
+            #  without saving; when bEnd = aStart, they are only adjacent
+            if bEnd <= aStart:
+                bI += 1
+                bStart, bEnd = bIntervals[bI]
+            # Othewise see which of the following overlaps is found & save
+            # If the bInterval start is not inside the aInt
+            elif bStart <= aStart:
+                # If bEnd is inside the aInt, just add up to bEnd
+                if bEnd < aEnd:
+                    overlaps.append((aStart, bEnd))
+                    bI += 1
+                    bStart, bEnd = bIntervals[bI]
+                # Otherwise the bInterval must overhang the entire aInt, so add
+                #  the entire aInt, BUT DO NOT move onto the next bInterval
+                #  until next aInt is also checked, as it also can be
+                #  overlapped by this bInterval!
+                else:
+                    overlaps.append((aStart, aEnd))
+                    break
+            # Otherwise the bStart must be inside the aInt; if the bEnd is also
+            #  inside the aInt, add the entire bInterval
+            elif bEnd < aEnd:
+                overlaps.append((bStart, bEnd))
+                bI += 1
+                bStart, bEnd = bIntervals[bI]
+            # The only option left is that the bInterval end is outside, while
+            #  the bInterval start is inside, so add the bInterval up to the
+            #  aEnd BUT again, do not move onto the following bInterval yet!
+            else:
+                overlaps.append((bStart, aEnd))
+                break
+                
+    return overlaps
 
 
-def getStrandedFeats(out_strandedFeats, out_db, featsOfInterest):
+def removeOverlaps(aIntervals, bIntervals):
+    """Helper function to remove the mutual overlaps of two lists of intervals
+    from ane of them (aIntervals) in linear time. This function uses the same
+    general logic as getOverlaps(). Note that this function assumes flattened
+    (internally non-overlapping) 0-based intervals.
+    
+    Parameters
+    ----------
+    aIntervals : (list)
+        [ (start, end) ]
+    bIntervals : (list)
+        [ (start, end) ]
+
+    Returns
+    -------
+    overlaps : (list)
+        [ (start, end) ]
+    """
+    
+    # Sort the two lists to be in the ascending order
+    aIntervals.sort(key = lambda interval: interval[0])
+    bIntervals.sort(key = lambda interval: interval[0])
+    # Initialize the output and bInt index, and extract the first bInt info
+    nonOverlaps = []
+    bI = 0
+    bStart, bEnd = bIntervals[bI]
+    # Test each possible pair of bIntervals & bIntervals in linear time
+    for aStart, aEnd in aIntervals:
+        # Initialize the non-overlap start of the aInterval to be modified
+        # Note: when the end of the aInterval is modified, it is added right
+        #  away and next aInterval is evaluated without changing the bInterval
+        noStart = aStart
+        # For this given aInt, keep going over the bIntervals as long as they
+        #  do not occur after the aInt, including when bStart = aEnd (adjacent)
+        #  Once the bInterval occurs after the aInt, add the non-overlapped
+        #  portion and go to next aInt
+        while bStart < aEnd:
+            # If the bInterval is entirely before the aInt, go to the next one
+            #  without modifying; when bEnd = noStart, they are only adjacent
+            if bEnd <= noStart:
+                bI += 1
+                bStart, bEnd = bIntervals[bI]
+            # Othewise see which of the following overlaps is found & modify
+            # If the bInterval start is before the aInt
+            elif bStart <= noStart:
+                # If the bEnd is inside the aInt, remove up to bEnd and move on
+                if bEnd < aEnd:
+                    noStart = bEnd
+                    bI += 1
+                    bStart, bEnd = bIntervals[bI]
+                # Otherwise the bInterval must overhang the entire aInt, so
+                #  skip adding the aInt entirely, without moving onto the next
+                #  bInterval, as the next aInt may be overlapped by this bInt
+                else:
+                    break
+            # Otherwise the bStart must be inside the aInt; if the bEnd is also
+            #  inside the aInt, add the left aInt overhang and update the start
+            elif bEnd < aEnd:
+                nonOverlaps.append(noStart, bStart)
+                noStart = bEnd
+                bI += 1
+                bStart, bEnd = bIntervals[bI]
+            # The only option left is that the bEnd is outside, while the
+            #  bStart is inside, so add the aInt up to the bStart BUT again,
+            #  do not move onto the following bInterval just yet!
+            else:
+                nonOverlaps.append(noStart, bStart)
+                break
+        # Once a bInt outside the aInterval is reached, add the non-overlapped
+        #  portion of the current aInterval and go to the next aInterval
+        else:
+            nonOverlaps.append(noStart, aEnd)
+            
+    return nonOverlaps
+
+
+def getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db, featsOfInterest):
     """Function to scan the GTF file and flatten the feats, preserving their
-    strandedness.    
+    strandedness. Converts 1-based to 0-based feats.   
 
     Parameters
     ----------
@@ -397,105 +519,51 @@ def getStrandedFeats(out_strandedFeats, out_db, featsOfInterest):
 
     Returns
     -------
-    flatStrandedFeats : (dict)
-        { strand : { featureType : [ ( ref, start, end ) ] } }
+    flatFeats : (dict)
+        { featuretype : { strand : { ref : [ ( start, end ) ] } } }
         where the T/F bool indicates +/- strand, respectively.
-
     """
     
-    # If the flat feats have been created before, load, otherwise process
+    # If the flat feats have been created before, load
     if os.path.isfile(out_strandedFeats):
-        flatStrandedFeats = loadPKL(out_strandedFeats)
-        if all(featType in flatStrandedFeats[strd].keys() \
-               for strd in (True, False) for featType in featsOfInterest):
-            return flatStrandedFeats
-    
+        flatFeats = loadPKL(out_strandedFeats)
+        # If all feat types needed have been processed, simply return;
+        #  otherwise new feature(s) will be added below
+        if all(featType in flatFeats.keys() for featType in featsOfInterest):
+            return flatFeats
+    # Only initiate a completely new dict if none has been made before
+    else:
+        flatFeats = collections.defaultdict(
+            lambda: collections.defaultdict(
+                lambda: collections.defaultdict()
+                )
+            )
+        
     # Connect the db
     db_conn = gffutils.FeatureDB(out_db, keep_order = True)
     
-    # Initiate the variables needed
-    flatStrandedFeats = {}
-    
     # Go over each strand separately
-    for strd in (True, False):
-        flatFeats = {}
-        for featType in featsOfInterest:
+    for featType in featsOfInterest:
+        for strd in (True, False):
             print('Flattening {}{}s'.format('+' if strd else '-', featType))
-            featList = []
+            featsByRef = collections.defaultdict(list)
             # Iterate through ALL features of this type, for each strand.
             for feat in db_conn.all_features(
                     featuretype = featType,
                     strand = '+' if strd else '-'
                     ):
-                # Integrate this new feat as a tuple: (ref, start, end)
-                featList = integrateFeat(
-                    (feat.seqid, feat.start, feat.end),
-                    featList
-                    )
-            # Save the feats in the master list to be saved
-            flatFeats[featType] = sorted(featList)
-        # Once all featureTypes are extracted, save the dict by strand
-        flatStrandedFeats[strd] = flatFeats
-    # Save the flattened feats to speed up the process in the future
-    savePKL(out_strandedFeats, flatStrandedFeats)
-    
-    return flatStrandedFeats
+                # Add this new feat as a tuple by ref: (start, end), 0-based
+                featsByRef[feat.seqid].append((feat.start - 1, feat.end))
+            # Once done for this Type & strd, flatten for each ref & save
+            for ref, feats in featsByRef.items():
+                flatFeats[featType][strd][ref] = flattenIntervals(feats)
 
-
-def getStrandedFeatsByGene(out_featsByGene, out_db, featType = 'transcript'):
-    """Get flattened feats (most often transcripts) by strand and gene.
-
-    Parameters
-    ----------
-    out_featsByGene : (str)
-        Path to saved output.
-    out_db : (str)
-        Path to the database.
-    featType : TYPE, optional
-        The type of feature to go over. The default is 'transcript'.
-
-    Returns
-    -------
-    flatStrandedFeatsByGene : (dict)
-        { strand : { gene : [ (ref, start, end) ] } }
-        where the T/F bool indicates +/- strand, respectively.
-    """
+    # Save the flattened feats to speed up the process in the future (note
+    #  that this may overwrite a previously existing file if a new featType
+    #  was processed)
+    savePKL(out_strandedFeats, flatFeats)
     
-    if os.path.isfile(out_featsByGene):
-        flatStrandedFeatsByGene = loadPKL(out_featsByGene)
-        return flatStrandedFeatsByGene
-    
-    # Connect the db
-    db_conn = gffutils.FeatureDB(out_db, keep_order = True)
-    
-    # Initiate the variables needed
-    flatStrandedFeatsByGene = {}
-    
-    # Go over each strand separately
-    for strd in (True, False):
-        featsByGene = collections.defaultdict(list)
-        print(
-            'Flattening {}{}s by gene'.format('+' if strd else '-',featType)
-            )
-        # Iterate through ALL features of this type, for each strand
-        for feat in db_conn.all_features(
-                featuretype = featType,
-                strand = '+' if strd else '-'
-                ):
-            # Retrieve gene from the appropriate list of 1
-            [gene] = feat.attributes['gene_id'] if 'gene_id' in \
-                feat.attributes.keys() else feat.attributes['gene']
-            # Integrate this new feat as a tuple: (ref, start, end)
-            featsByGene[gene] = integrateFeat(
-                (feat.seqid, feat.start, feat.end),
-                featsByGene[gene]
-                )
-        # Once all featureTypes are extracted, save the dict by strand
-        flatStrandedFeatsByGene[strd] = featsByGene
-    # Save the flattened feats to speed up the process in the future
-    savePKL(out_featsByGene, flatStrandedFeatsByGene)
-    
-    return flatStrandedFeatsByGene
+    return flatFeats
     
 
 def normalizeLabels(
@@ -538,17 +606,19 @@ def normalizeLabels(
     regions = collections.defaultdict(int)
     
     # First, if not done yet, flatten the relevant features
-    flatStrandedFeats = getStrandedFeats(
+    flatFeats = getFlatFeatsByTypeStrdRef(
         out_strandedFeats,
         out_db,
         featsOfInterest
         )
 
-    # Add up the cumulative feature length, summing up both strands
-    for featDict in flatStrandedFeats.values():
-        for featType, feats in featDict.items():
-            # 1-based, closed intervals [start, end]
-            regions[featType] += sum([feat[2] - feat[1] + 1 for feat in feats])
+    # Add up the cumulative feature length, summing up over strands & refs
+    for featType, featsByStrdRef in flatFeats.items():
+        # Go over strands
+        for featsByRef in featsByStrdRef.values():
+            # Go over refs
+            for feats in featsByRef.values():
+                regions[featType] += sum([feat[1] - feat[0] for feat in feats])
     
     # Get the genome length for this fasta file
     genLen = getGenomeLength(fasta)
@@ -584,7 +654,7 @@ def normalizeLabels(
     return df_norm
 
 
-def getGeneLenToSNRs(lenToSNRs, concordant = True):
+def getSNRsByGeneLen(lenToSNRs, concordant = True):
     """Function to sort SNRs by all genes that each of them maps to.
 
     Parameters

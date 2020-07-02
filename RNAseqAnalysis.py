@@ -10,7 +10,8 @@ import pysam
 import gffutils
 import collections
 import numpy as np
-from SNRanalysis import getStrandedFeats, getGeneLenToSNRs
+from SNRanalysis import getFlatFeatsByTypeStrdRef, getSNRsByGeneLen, \
+    flattenIntervals, getOverlaps, removeOverlaps
 from SNRdetection import savePKL, loadPKL
 from IPython.display import clear_output
 
@@ -98,7 +99,7 @@ def filterReads(
         return    
     
     # This will usually just load the file
-    flatStrandedFeats = getStrandedFeats(
+    flatFeats = getFlatFeatsByTypeStrdRef(
         out_strandedFeats,
         out_db,
         (featType, )
@@ -111,31 +112,23 @@ def filterReads(
     # This needs to start off as a set to avoid double-adding reads aligned to
     #  two features of the same type
     filt_reads = set()
-    current_ref = ''
     
     # Get only reads on the same/other strand (depends if concordant or not)
     #  as the feature in question
-    for strd in (True, False):
+    for strd, featsByStrdRef in flatFeats[featType].items():
         # Cycle over the feats under the appropriate key
-        for feat in sorted(flatStrandedFeats[strd][featType]):
-            if current_ref != feat[0]:
-                current_ref = feat[0]
-                print(
-                    'Processing {} strand of reference {}'.format(
-                        '+' if strd else '-',
-                        current_ref
-                        )
+        for ref, feats in featsByStrdRef.items():
+            print(
+                'Processing {} strand of reference {}'.format(
+                    '+' if strd else '-',
+                    ref
                     )
-            # Gffutils features have 1-based [x,y] closed intervals,
-            #  while pysam fetch has 0-based [x,y) half-open intervals
-            for read in bam.fetch(
-                    contig = feat[0],
-                    start = feat[1] - 1,
-                    end = feat[2]
-                    ):
-                # Make sure the read is on the correct strand before adding:
-                if concordant == (read.is_reverse != strd):
-                    filt_reads.add(read)
+                )
+            for start, end in feats:
+                for read in bam.fetch(contig = ref, start = start, end = end):
+                    # Make sure the read is on the correct strand before adding:
+                    if concordant == (read.is_reverse != strd):
+                        filt_reads.add(read)
     
     # Transform the set into a list for sorting
     filt_reads_list = list(filt_reads)
@@ -195,7 +188,7 @@ def getExpectedCoverage(
         return expected
     
     # In most cases, this should just load a file
-    flatStrandedFeats = getStrandedFeats(
+    flatFeats = getFlatFeatsByTypeStrdRef(
         out_strandedFeats,
         out_db,
         (baselineFeat, )
@@ -208,26 +201,26 @@ def getExpectedCoverage(
     totalLength = 0
 
     # Get the total length of the feats and the total coverage over them
-    for strd in (True, False):
+    for strd, featsByRef in flatFeats[baselineFeat].items():
         print(
             'Scanning {}{}s for total coverage and length...'.format(
                 '+' if strd else '-',
                 baselineFeat
                 )
             )
-        for feat in flatStrandedFeats[strd][baselineFeat]:
-            # Note that pysam is 0-based; my vars are 1-based (like the gtf)
-            totalLength += feat[2] - feat[1] + 1
-            totalCoverage += np.sum(
-                bam.count_coverage(
-                    contig = feat[0],
-                    start = feat[1] - 1,      # 1-based => 0-based
-                    stop = feat[2],
-                    quality_threshold = 0,
-                    read_callback = lambda r: r.is_reverse != strd
-                    ),
-                dtype = 'int'
-                )
+        for ref, feats in featsByRef.items():
+            for start, end in feats:
+                totalLength += end - start
+                totalCoverage += np.sum(
+                    bam.count_coverage(
+                        contig = ref,
+                        start = start,
+                        stop = end,
+                        quality_threshold = 0,
+                        read_callback = lambda r: r.is_reverse != strd
+                        ),
+                    dtype = 'int'
+                    )
     bam.close()
     
     # Normalize the coverage by #SNRs, total coverage, and total length
@@ -454,7 +447,7 @@ def getCovPerTran(
         )
     
     # In most cases, this should just load a file
-    flatStrandedFeats = getStrandedFeats(
+    flatFeats = getFlatFeatsByTypeStrdRef(
         out_strandedFeats,
         out_db,
         ('transcript', )
@@ -467,57 +460,58 @@ def getCovPerTran(
     transCount = 0
     coverage = np.zeros((window), 'L')
     
-    for strd in (True, False):
+    for strd, featsByRef in flatFeats['transcript'].items():
         print(
             'Going over coverage of {}transcripts'.format('+' if strd else '-')
             )
-        for feat in flatStrandedFeats[strd]['transcript']:
-            if strd:
-                mid = feat[2]
-            else:
-                mid = feat[1]
-            start = int(mid - window / 2)
-            stop = int(mid + window / 2)
-            # Include correctins for the start & end if the window
-            #  falls out of the reference size range
-            if start < 0:
-                corrStart = 0
-            else:
-                corrStart = start
-            refLen = bam.get_reference_length(feat[0])
-            if stop > refLen:
-                corrStop = refLen
-            else:
-                corrStop = stop
-            # Get the coverage summed over A/T/C/G; count only concordant reads
-            refCoverage = np.sum(
-                bam.count_coverage(
-                    contig = feat[0],
-                    start = corrStart,
-                    stop = corrStop,
-                    quality_threshold = 0,
-                    read_callback = lambda r: r.is_reverse != strd
-                    ),
-                axis = 0
-                )
-            transCount += 1
-            # If the window was out of the ref range, fill in the rest
-            if corrStart == 0:
-                refCoverage = np.append(
-                    np.zeros((0 - start), 'L'),
-                    refCoverage
+        for ref, feats in featsByRef.items():
+            refLen = bam.get_reference_length(ref)
+            for feat in feats:
+                if strd:
+                    mid = feat[1]
+                else:
+                    mid = feat[0]
+                start = int(mid - window / 2)
+                stop = int(mid + window / 2)
+                # Include correctins for the start & end if the window
+                #  falls out of the reference size range
+                if start < 0:
+                    corrStart = 0
+                else:
+                    corrStart = start
+                if stop > refLen:
+                    corrStop = refLen
+                else:
+                    corrStop = stop
+                # Get the coverage summed over A/T/C/G; count only concordant
+                refCoverage = np.sum(
+                    bam.count_coverage(
+                        contig = ref,
+                        start = corrStart,
+                        stop = corrStop,
+                        quality_threshold = 0,
+                        read_callback = lambda r: r.is_reverse != strd
+                        ),
+                    axis = 0
                     )
-            if corrStop != stop:
-                refCoverage = np.append(
-                    refCoverage,
-                    np.zeros((stop - corrStop), 'L')
-                    )
-            # If needed, flip the coverage to be in the 5'->3'
-            #  orientation wrt/ the transcript feature direction
-            if not strd:
-                refCoverage = refCoverage[::-1]
-            # Add the SNR
-            coverage += refCoverage
+                transCount += 1
+                # If the window was out of the ref range, fill in the rest
+                if corrStart == 0:
+                    refCoverage = np.append(
+                        np.zeros((0 - start), 'L'),
+                        refCoverage
+                        )
+                if corrStop != stop:
+                    refCoverage = np.append(
+                        refCoverage,
+                        np.zeros((stop - corrStop), 'L')
+                        )
+                # If needed, flip the coverage to be in the 5'->3'
+                #  orientation wrt/ the transcript feature direction
+                if not strd:
+                    refCoverage = refCoverage[::-1]
+                # Add the SNR
+                coverage += refCoverage
     # Normalize the coverage only once at the end
     normCov = coverage / (transCount * expCov)
     
@@ -525,107 +519,6 @@ def getCovPerTran(
     savePKL(out_TranCov, normCov)
     
     return normCov
-
-
-def integrateEnding(nEnding, oldEndings):
-    """Helper function to merge overlapping endings, similar to integrateFeats. 
-
-    Parameters
-    ----------
-    nEnd : (tuple)
-        ( start, end )
-    oldEnds : (list)
-        [ (start, end ) ]
-
-    Returns
-    -------
-    oldEnds : (list)
-        [ ( start, end ) ] such that the endings do not overlap.
-    """
-    
-    nStart = nEnding[0]
-    nEnd = nEnding[1]
-    # Go over the list of previously saved endings, check for overlap and save
-    #  all the overlaps found in a list.
-    overlaps = []
-    for oStart, oEnd in oldEndings:
-        # If (the new End's beginning is within the old End)
-        #  or (the new End's end is within the old End)
-        #  or (the new End spans the old End)
-        #  ), add old End to the overlaps list
-        # Note that start = end constitutes an adjacency (not an overlap), but
-        #  even then a merge is desirable, nevertheless.
-        if (nStart >= oStart and nStart <= oEnd) \
-            or (nEnd >= oStart and nEnd <= oEnd) \
-            or (nStart < oStart and nEnd > oEnd):
-                overlaps.append((oStart, oEnd))
-    # If overlaps have been found, modify the nStart and nEnd, while removing
-    #  the old overlapping endings from the master list
-    #  (which can't be edited in the loop above)
-    if overlaps != []:
-        # Go over all the overlaps & update the new start & end as necessary
-        for eStart, eEnd in overlaps:
-            if eStart < nStart:
-                nStart = eStart
-            if eEnd > nEnd:
-                nEnd = eEnd
-            # When done considering the oEnding, remove it from the master list
-            oldEndings.remove((eStart, eEnd))
-    # Add the new ending (merged, if necessary) to the list
-    oldEndings.append((nStart, nEnd))
-    
-    return sorted(oldEndings)
-
-
-def removeOverlaps(SNRendings, tEndings):
-    """Helper function to remove portions of SNRendings (exons) that are
-    overlapped by Tendings (endpieces). All 0-based.
-
-    Parameters
-    ----------
-    SNRendings : list
-        [ ( start, end ) ]
-    Tendings : list
-        [ ( start, end ) ]
-
-    Returns
-    -------
-    SNRendings : list
-        [ ( start, end ) ]
-    """
-
-    newEndings = []
-    for SNRe in SNRendings:
-        # Initiate the start & end of the pieces to be preserved
-        SNRstart = SNRe[0]
-        SNRend = SNRe[1]
-        # Look for any overlap with Tendings
-        for tStart, tEnd in tEndings:
-            # Treat each case of overlap separately:
-            # Complete overlap / both start & end within
-            if SNRstart >= tStart and SNRend <= tEnd:
-                break
-            # Shorten start if only start within
-            elif SNRstart >= tStart and SNRstart < tEnd:
-                SNRstart = tEnd
-            # Shorten end if only end within
-            elif SNRend > tStart and SNRend <= tEnd:
-                SNRend = tStart
-            # If a Tending is entirely within an SNRending, treat recursively,
-            #  with the two overhangs each as a new separate SNRending
-            elif SNRstart < tStart and SNRend > tEnd:
-                newEndings.extend(
-                    removeOverlaps(
-                        [(SNRstart, tStart), (tEnd, SNRend)],
-                        tEndings
-                        )
-                    )
-                break
-        # If break was encountered, add the current start & end
-        else:
-            newEndings.append((SNRstart, SNRend))
-
-    return sorted(newEndings)
 
 
 def getNonCanCovGenes(
@@ -674,7 +567,7 @@ def getNonCanCovGenes(
     
     nonCanCovGenes = []
     # Sort SNRs by gene
-    geneLenToSNRs = getGeneLenToSNRs(lenToSNRs, concordant = True)
+    geneLenToSNRs = getSNRsByGeneLen(lenToSNRs, concordant = True)
     db = gffutils.FeatureDB(out_db, keep_order = True)
     bam = pysam.AlignmentFile(bamfile, 'rb')
     progressTracker = 0
@@ -764,7 +657,9 @@ def getNonCanCovGenes(
                     )
             else:
                 continue
-            Tendings = integrateEnding(newEnding, Tendings)
+            Tendings.append(newEnding)
+        # Flattend the endings
+        Tendings = flattenIntervals(Tendings)
         # Get the coverage of transcripts endings
         endCoverage = 0
         for covS, covE in Tendings:
@@ -798,7 +693,9 @@ def getNonCanCovGenes(
                     else:
                         continue
                     # Add the new ending to the list without overlap
-                    SNRendings = integrateEnding(newSNRe, SNRendings)
+                    SNRendings.append(newSNRe)
+                # Flatten the SNRendings
+                SNRendings = flattenIntervals(SNRendings)
                 # Remove the portions of SNRendings overlapped by Tendings
                 SNRendings = removeOverlaps(SNRendings, Tendings)
                 # Get the SNR coverage attributable to SNRs of this length
@@ -877,7 +774,6 @@ def getBaselineData(out_transBaselineData, out_db, bamfile):
     
     for strd in (True, False):
         for refname in references:
-            # Initiate the flattened exon list for this reference
             for trans in db.features_of_type(
                 featuretype = 'transcript',
                 limit = (refname, 1, bam.get_reference_length(refname)),
@@ -911,12 +807,12 @@ def getBaselineData(out_transBaselineData, out_db, bamfile):
                 covTransByStrdRef[strd][refname].append(
                     Transcript(geneID, trans0start, trans0end, exons)
                     )
-                # Integrate these exons in the ref-wide flattened exon list
-                for exon in exons:
-                    covExonsByStrdRef[strd][refname] = integrateEnding(
-                        exon,
-                        covExonsByStrdRef[strd][refname]
-                        )
+                # Add these exons in the ref-wide exon list
+                covExonsByStrdRef[strd][refname].extend(exons)
+            # Flatten the ref-wide exon list
+            covExonsByStrdRef[strd][refname] = flattenIntervals(
+                covExonsByStrdRef[strd][refname]
+                )
     
     savePKL(out_transBaselineData, (covTransByStrdRef, covExonsByStrdRef))
     
@@ -1011,25 +907,26 @@ def getTransEndSensSpec(
                     exLen = exon[1] - exon[0]
                     # If not, add the entire exon & decrease the remainder
                     if exLen < remaining:
-                        transEndPieces = integrateEnding(exon, transEndPieces)
+                        transEndPieces.append(exon)
                         remaining -= exLen
                     # Otherwise add only the remaining piece of the exon
                     else:
-                        transEndPieces = integrateEnding(
+                        transEndPieces.append(
                             (exon[1] - remaining, exon[1]) if strd \
-                                else (exon[0], exon[0] + remaining),
-                            transEndPieces
+                                else (exon[0], exon[0] + remaining)
                             )
                         break
             
+            # Flatten the transEndPieces
+            transEndPieces = flattenIntervals(transEndPieces)
             # For each reference (on each strand), extract and add the exon
             #  coverage and non-covBP for the exon-wise end pieces
-            for transEndpiece in transEndPieces:
+            for transEndPiece in transEndPieces:
                 endsCov = np.sum(
                     bam.count_coverage(
                         contig = refname,
-                        start = transEndpiece[0],      # already 0-based
-                        stop = transEndpiece[1],
+                        start = transEndPiece[0],      # already 0-based
+                        stop = transEndPiece[1],
                         quality_threshold = 0,
                         read_callback = lambda r: r.is_reverse != strd
                         ),
@@ -1202,43 +1099,6 @@ def getTransEndROC(
     return results
 
 
-def getOverlaps(SNRpieces, exons):
-    """Helper function to get the overlaps between SNRpieces and exons. Note
-    that this function assumes internally non-overlapping SNRpieces and exons.
-    
-    Parameters
-    ----------
-    SNRpieces : TYPE
-        [ (start, end) ]
-    exons : TYPE
-        [ (start, end) ]
-
-    Returns
-    -------
-    overlaps : TYPE
-        [ (start, end) ]
-    """
-    
-    overlaps = []
-    # Test each possible pair of SNRpieces & exons
-    for SNRstart, SNRend in SNRpieces:
-        for exonStart, exonEnd in exons:
-            # When the entire SNR piece is within the exon, add the SNR piece
-            if SNRstart >= exonStart and SNRend <= exonEnd:
-                overlaps.append((SNRstart, SNRend))
-            # If only SNRstart is within the exon, add up to exonEnd
-            elif SNRstart >= exonStart and SNRstart < exonEnd:
-                overlaps.append((SNRstart, exonEnd))
-            # If only SNRend is within the exon, add starting with exonStart
-            elif SNRend > exonStart and SNRend <= exonEnd:
-                overlaps.append((exonStart, SNRend))
-            # If the exon is entirely overhung by the SNRpiece, add the exon
-            elif SNRstart < exonStart and SNRend > exonEnd:
-                overlaps.append((exonStart, exonEnd))
-                
-    return overlaps
-
-
 def getSNREndROC(
         transROC,
         lenToSNRs,
@@ -1301,7 +1161,9 @@ def getSNREndROC(
                     if SNR.strand == strd and SNR.record == refName:
                         start = SNR.start - optEndLen if strd else SNR.end
                         end = SNR.start if strd else SNR.end + optEndLen
-                        SNRpieces = integrateEnding((start, end), SNRpieces)
+                        SNRpieces.append((start, end))
+                # Flatten the SNRpieces
+                SNRpieces = flattenIntervals(SNRpieces)
                 # Retain only where these overlap with the transStarts (exons)
                 exonSNRpieces = getOverlaps(
                     SNRpieces,
@@ -1326,11 +1188,12 @@ def getSNREndROC(
                         )
                     TP += np.sum(pieceCov)
                     FP += np.count_nonzero(pieceCov == 0)
-                    # Integrate each piece into the ones from previous SNRlens
-                    SNRpiecesByStrdRef[strd][refName] = integrateEnding(
-                        piece,
-                        SNRpiecesByStrdRef[strd][refName]
-                        )
+                # Add the newSNRpieces to those from previous SNR lengths
+                SNRpiecesByStrdRef[strd][refName].extend(newSNRpieces)
+                # Flatten the SNRs (should contain no overlaps, only adjacency)
+                SNRpiecesByStrdRef[strd][refName] = flattenIntervals(
+                    SNRpiecesByStrdRef[strd][refName]
+                    )
         # Update the TN & FN for this SNR length
         TN -= FP
         FN -= TP
