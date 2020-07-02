@@ -393,6 +393,8 @@ def getOverlaps(aIntervals, bIntervals):
         return overlaps
     bI = 0
     bStart, bEnd = bIntervals[bI]
+    # Once bI reaches lenOfB, return overlaps
+    lenOfB = len(bIntervals)
     # Test each possible pair of bIntervals & bIntervals in linear time
     for aStart, aEnd in aIntervals:
         # For this given aInt, keep going over the bIntervals as long as they
@@ -403,7 +405,10 @@ def getOverlaps(aIntervals, bIntervals):
             #  without saving; when bEnd = aStart, they are only adjacent
             if bEnd <= aStart:
                 bI += 1
-                bStart, bEnd = bIntervals[bI]
+                if bI < lenOfB:
+                    bStart, bEnd = bIntervals[bI]
+                else:
+                    return overlaps
             # Othewise see which of the following overlaps is found & save
             # If the bInterval start is not inside the aInt
             elif bStart <= aStart:
@@ -411,7 +416,10 @@ def getOverlaps(aIntervals, bIntervals):
                 if bEnd < aEnd:
                     overlaps.append((aStart, bEnd))
                     bI += 1
-                    bStart, bEnd = bIntervals[bI]
+                    if bI < lenOfB:
+                        bStart, bEnd = bIntervals[bI]
+                    else:
+                        return overlaps
                 # Otherwise the bInterval must overhang the entire aInt, so add
                 #  the entire aInt, BUT DO NOT move onto the next bInterval
                 #  until next aInt is also checked, as it also can be
@@ -424,7 +432,10 @@ def getOverlaps(aIntervals, bIntervals):
             elif bEnd < aEnd:
                 overlaps.append((bStart, bEnd))
                 bI += 1
-                bStart, bEnd = bIntervals[bI]
+                if bI < lenOfB:
+                    bStart, bEnd = bIntervals[bI]
+                else:
+                    return overlaps
             # The only option left is that the bInterval end is outside, while
             #  the bInterval start is inside, so add the bInterval up to the
             #  aEnd BUT again, do not move onto the following bInterval yet!
@@ -464,6 +475,8 @@ def removeOverlaps(aIntervals, bIntervals):
     nonOverlaps = []
     bI = 0
     bStart, bEnd = bIntervals[bI]
+    # Once bI reaches lenOfB, return nonOverlaps
+    lenOfB = len(bIntervals)
     # Test each possible pair of bIntervals & bIntervals in linear time
     for aStart, aEnd in aIntervals:
         # Initialize the non-overlap start of the aInterval to be modified
@@ -474,12 +487,15 @@ def removeOverlaps(aIntervals, bIntervals):
         #  do not occur after the aInt, including when bStart = aEnd (adjacent)
         #  Once the bInterval occurs after the aInt, add the non-overlapped
         #  portion and go to next aInt
-        while bStart < aEnd:
+        while bStart < aEnd and bI <= lenOfB:
             # If the bInterval is entirely before the aInt, go to the next one
             #  without modifying; when bEnd = noStart, they are only adjacent
             if bEnd <= noStart:
                 bI += 1
-                bStart, bEnd = bIntervals[bI]
+                if bI < lenOfB:
+                    bStart, bEnd = bIntervals[bI]
+                else:
+                    return nonOverlaps
             # Othewise see which of the following overlaps is found & modify
             # If the bInterval start is before the aInt
             elif bStart <= noStart:
@@ -487,7 +503,10 @@ def removeOverlaps(aIntervals, bIntervals):
                 if bEnd < aEnd:
                     noStart = bEnd
                     bI += 1
-                    bStart, bEnd = bIntervals[bI]
+                    if bI < lenOfB:
+                        bStart, bEnd = bIntervals[bI]
+                    else:
+                        return nonOverlaps
                 # Otherwise the bInterval must overhang the entire aInt, so
                 #  skip adding the aInt entirely, without moving onto the next
                 #  bInterval, as the next aInt may be overlapped by this bInt
@@ -499,7 +518,10 @@ def removeOverlaps(aIntervals, bIntervals):
                 nonOverlaps.append(noStart, bStart)
                 noStart = bEnd
                 bI += 1
-                bStart, bEnd = bIntervals[bI]
+                if bI < lenOfB:
+                    bStart, bEnd = bIntervals[bI]
+                else:
+                    return nonOverlaps
             # The only option left is that the bEnd is outside, while the
             #  bStart is inside, so add the aInt up to the bStart BUT again,
             #  do not move onto the following bInterval just yet!
