@@ -29,24 +29,20 @@ processed = 0
 timeStart = None
 
 # A dictionary of letters to avoid for splitting, given the base sought
-avoidSplits = {
-    'A':('a', 'A', 't', 'T'),
-    'T':('a', 'A', 't', 'T'),
-    'C':('c', 'C', 'g', 'G'),
-    'G':('c', 'C', 'g', 'G'),
-    }
+avoidSplits = {'A':('a', 'A', 't', 'T'),
+               'T':('a', 'A', 't', 'T'),
+               'C':('c', 'C', 'g', 'G'),
+               'G':('c', 'C', 'g', 'G'),}
 
 # Dict of complementary bases
 compDict = {'A':'T', 'T':'A', 'C':'G', 'G':'C', 'N':'N'}
 
 # Handling of non-caps in the sequence
-capsDict = {
-    'A':('a', 'A'),
-    'T':('t', 'T'),
-    'C':('c', 'C'),
-    'G':('g', 'G'),
-    'N':'N'
-    }
+capsDict = {'A':('a', 'A'),
+            'T':('t', 'T'),
+            'C':('c', 'C'),
+            'G':('g', 'G'),
+            'N':'N'}
 
 
 class SNR:
@@ -57,19 +53,8 @@ class SNR:
         - Coordinates are 0-based.
     """    
     
-    def __init__(
-            self,
-            base,
-            record,
-            start,
-            end,
-            mism,
-            strand,
-            cFeats,
-            cGenes,
-            dFeats,
-            dGenes
-            ):
+    def __init__(self, base, record, start, end, mism, strand, cFeats, cGenes,
+                 dFeats, dGenes):
         self.base = base        # str, 'A', 'T', 'C' or 'G'
         self.record = record    # str, record (chromosome) where SNR is found
         self.start = start      # int, start of the SNR locus
@@ -89,8 +74,7 @@ class SNR:
             self.mism,
             self.record,
             self.start,
-            self.end
-            )
+            self.end)
 
 
 def getGenomeLength(fasta):
@@ -120,9 +104,8 @@ def getGenomeLength(fasta):
             for ch in SeqIO.parse(genome, 'fasta'):
                 genLen += len(ch.seq)
         genomeLengths[fasta] = genLen
-        print(
-            'The total genome length is {:,} bp.'.format(genomeLengths[fasta])
-            )
+        print('The total genome length is {:,} '\
+              'bp.'.format(genomeLengths[fasta]))
     
     return genomeLengths[fasta]
 
@@ -180,9 +163,7 @@ def getPieces(base, fasta, cpus, cFR):
     # Initiate the range of piece sizes as a reusable tuple (which is a range
     #  of pre-set franctions of the genome divided by the # of cpus) & announce
     ran = (genLen//(cFR[0]*cpus), genLen//(cFR[1]*cpus))
-    print(
-        'Each piece will contain between {:,} and {:,} bp...'.format(*ran)
-        )
+    print('Each piece will contain between {:,} and {:,} bp...'.format(*ran))
     # Initiate the parameters for the first piece & the master list itself
     unit = randint(*ran)    
     piece = []
@@ -219,11 +200,8 @@ def getPieces(base, fasta, cpus, cFR):
     # Save the total number of pieces to the respective global variable
     totalPieces = len(allPieces)
     # Sort the pieces in place by their total length, largest to smallest
-    print(
-        'Sorting {:,} pieces by the total number of bp...'.format(
-            totalPieces
-            )
-        )
+    print('Sorting {:,} pieces by the total number of '\
+          'bp...'.format(totalPieces))
     allPieces.sort(key = lambda x: sum([len(i[2]) for i in x]), reverse = True)
     
     return allPieces
@@ -320,9 +298,8 @@ def findSNRs(base, piece, db_out, temp, minFeatLen, minSNRlen):
                             genes = collections.defaultdict(bool)
                             # For each feature from the db spanned by the SNR
                             for ft in db_conn.region(
-                                region = (s[0], s[1] + first, s[1] + last + 1),
-                                strand = strd
-                                ):
+                                    region = (s[0], s[1]+first, s[1]+last+1),
+                                    strand = strd):
                             # Note that the region() query is a 1-based (a,b)
                             #  open interval, as documented here:
                             #  https://github.com/daler/gffutils/issues/129
@@ -361,16 +338,8 @@ def findSNRs(base, piece, db_out, temp, minFeatLen, minSNRlen):
                         # If the SNR is large enough, add the SNR to the dict
                         if length >= minSNRlen:
                             lenToSNRs[length].append(
-                                SNR(
-                                    base,
-                                    s[0],
-                                    s[1] + first,
-                                    s[1] + last,
-                                    0,
-                                    b == base,
-                                    *elems
-                                    )
-                                )
+                                SNR(base, s[0], s[1] + first, s[1] + last, 0,
+                                    b == base, *elems))
                         # For each SNR, break the for-loop so that if 'base'
                         #  was found in the first position of the SNR, 'cBase'
                         #  is not tested for in the same position again
@@ -399,13 +368,8 @@ def howLongSince(t_start):
     # Save how much has elapsed (in seconds)
     t_diff = time.time() - t_start
     
-    print(
-        "{}h:{}m:{}s elapsed".format(
-            int(t_diff//(60*60)),
-            int((t_diff%(60*60))//60),
-            int(t_diff%60)
-            )
-        )
+    print("{}h:{}m:{}s elapsed".format(
+        int(t_diff//(60*60)), int((t_diff%(60*60))//60), int(t_diff%60)))
 
 
 def collectResult(result):
@@ -441,20 +405,12 @@ def collectResult(result):
     # Announce progress
     t_since = time.time() - timeStart
     t_left = t_since/processed * (totalPieces - processed)
-    print(
-        'Processed {:,} / {:,} ({:.2%}) splits in {}h:{}m:{}s. '\
-            'Time remaining: ~{}h:{}m:{}s'.format(
-                processed,
-                totalPieces,
-                processed / totalPieces,
-                int(t_since//(60*60)),
-                int((t_since%(60*60))//60),
-                int(t_since%60),
-                int(t_left//(60*60)),
-                int((t_left%(60*60))//60),
-                int(t_left%60),
-                )
-        )
+    print('Processed {:,} / {:,} ({:.2%}) splits in {}h:{}m:{}s. Time '\
+          'remaining: ~{}h:{}m:{}s'.format(
+              processed, totalPieces, processed / totalPieces,
+              int(t_since//(60*60)), int((t_since%(60*60))//60),
+              int(t_since%60), int(t_left//(60*60)), int((t_left%(60*60))//60),
+              int(t_left%60)))
     
     
 def saveSNRcsv(loc, lengthToSNRcounts):
@@ -547,22 +503,9 @@ def loadPKL(loc):
     return var
 
 
-def getSNRs(
-        base,
-        fasta,
-        gff,
-        out_db,
-        out_snrs,
-        out_csv,
-        out_concf,
-        out_discf,
-        temp = '.',
-        minFeatLen = 1,
-        minSNRlen = 5,
-        cpus = 70,
-        maxtasks = None,
-        cFR = (40, 5)
-        ):
+def getSNRs(base, fasta, gff, out_db, out_snrs, out_csv, out_concf, out_discf,
+            temp = '.', minFeatLen = 1, minSNRlen = 5, cpus = 70,
+            maxtasks = None, cFR = (40, 5)):
     """Wrapper function for parallel processing of genome scanning for SNRs.
 
     Parameters
@@ -620,11 +563,12 @@ def getSNRs(
     
     # If available, just load the previously saved data
     if os.path.isfile(out_snrs) and os.path.isfile(out_csv) \
-        and os.path.isfile(out_concf) and os.path.isfile(out_discf):
+            and os.path.isfile(out_concf) and os.path.isfile(out_discf):
         resSNRcounts = loadSNRcsv(out_csv)
         resConcFeats = loadPKL(out_concf)
         resDiscFeats = loadPKL(out_discf)
         resSNRs = loadPKL(out_snrs)
+        
         return resSNRs, resSNRcounts, resConcFeats, resDiscFeats
     
     # Otherwise create it by processing
@@ -632,14 +576,8 @@ def getSNRs(
     print('Checking for a database...')
     if not os.path.isfile(out_db):
         print('None had been created - creating a new database...')
-        gffutils.create_db(
-            gff,
-            dbfn = out_db,
-            force = True,
-            merge_strategy = 'create_unique',
-            #id_spec = ['ID', 'Name'],
-            verbose = True
-            )
+        gffutils.create_db(gff, dbfn = out_db, force = True,
+                           merge_strategy = 'create_unique', verbose = True)
         # Note that not specifying id_spec makes the db creation much slower
         #  (up to 5 hrs instead of ~20 min) but enables proper functioning of
         #  gffutils.FeatureDB.children(), as discussed here:
@@ -660,8 +598,7 @@ def getSNRs(
         pool.apply_async(
             func = findSNRs,
             args = (base, piece, out_db, temp, minFeatLen, minSNRlen),
-            callback = collectResult
-            )
+            callback = collectResult)
     # Close the pool
     pool.close()
     # Join the processes

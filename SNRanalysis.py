@@ -16,11 +16,9 @@ from Bio import SeqIO
 from SNRdetection import loadPKL, savePKL, getGenomeLength, compDict, capsDict
 
 # Default exclusivePairs
-pairs = [
-    ('gene', 'Intergenic'),
-    ('transcript', 'Regulatory'),
-    ('exon', 'Intron')
-    ]
+pairs = [('gene', 'Intergenic'),
+         ('transcript', 'Regulatory'),
+         ('exon', 'Intron')]
 
 
 def getBaseComp(out_bases, fasta = None, showGC = True):
@@ -65,11 +63,8 @@ def getBaseComp(out_bases, fasta = None, showGC = True):
         gc = bases['C'] + bases['c'] + bases['G'] + bases['g']
         sumKnownBases = bases['A'] + bases['a'] + bases['T'] + bases['t'] \
             + bases['C'] + bases['c'] + bases['G'] + bases['g']
-        print(
-            'Scanning finished, G/C content: {:.2%}'.format(
-                round(gc / sumKnownBases, 2)
-                )
-            )
+        print('Scanning finished, G/C content: {:.2%}'.format(
+            round(gc / sumKnownBases, 2)))
     
     return bases
 
@@ -107,33 +102,21 @@ def countsCheck(base, lengthToSNRcounts, lenToFeats, out_bases, fasta = None):
     bases = getBaseComp(out_bases, fasta = fasta)
     # Get the number of bases (including complementary and non-caps) from the
     #  genome scan.
-    scanned = bases[capsDict[base][0]] \
-        + bases[capsDict[base][1]] \
-            + bases[capsDict[compDict[base]][0]] \
-                + bases[capsDict[compDict[base]][1]]
+    scanned = (bases[capsDict[base][0]]
+               + bases[capsDict[base][1]]
+               + bases[capsDict[compDict[base]][0]]
+               + bases[capsDict[compDict[base]][1]])
     
     featbases = sum([c*l for l,cs in lenToFeats.items() for c in cs.values()])
     
     if SNRbases == scanned == featbases:
-        print(
-            'The total number of {}/{} bases ({:,}) '\
-                'checks out across SNRs, feature sets, and genome!'.format(
-                base,
-                compDict[base],
-                SNRbases
-                )
-            )
+        print('The total number of {}/{} bases ({:,}) '\
+              'checks out across SNRs, feature sets, and genome!'.format(
+                  base, compDict[base], SNRbases))
     else:
-        print(
-            '{}/{} bases in SNRs: {:,}; from genome scanning {:,}; '\
-                'from feature counting: {:,}'.format(
-                base,
-                compDict[base],
-                SNRbases,
-                scanned,
-                featbases
-                )
-            )
+        print('{}/{} bases in SNRs: {:,}; from genome scanning {:,}; '\
+              'from feature counting: {:,}'.format(
+                  base, compDict[base], SNRbases, scanned, featbases))
 
 
 def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
@@ -162,13 +145,13 @@ def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
     # Get the base composition of the genome
     bases = getBaseComp(out_bases, fasta = fasta)
     
-    sumKnownBases = bases['A'] + bases['a'] + bases['T'] + bases['t'] \
-        + bases['C'] + bases['c'] + bases['G'] + bases['g']
+    sumKnownBases = (bases['A'] + bases['a'] + bases['T'] + bases['t']
+                     + bases['C'] + bases['c'] + bases['G'] + bases['g'])
     
     # Calculate the frequency of the base in question and its complement
-    pBase = (bases[capsDict[base][0]] \
+    pBase = (bases[capsDict[base][0]]
              + bases[capsDict[base][1]]) / sumKnownBases
-    pComp = (bases[capsDict[compDict[base]][0]] \
+    pComp = (bases[capsDict[compDict[base]][0]]
              + bases[capsDict[compDict[base]][1]]) / sumKnownBases
     
     # Obtain the table data as a list of 3 respective lists: SNRlength,
@@ -179,11 +162,9 @@ def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
     for k,v in lengthToSNRcounts.items():
         polyLen.append(int(k))
         obs.append(int(v))
-        oe.append(
-            (int(v)/int(sumKnownBases)) \
-                / ( (1-pBase) * pBase**int(k) * (1-pBase) \
-                   + (1-pComp) * pComp**int(k) * (1-pComp) )
-            )
+        oe.append((int(v)/int(sumKnownBases))
+                  / ((1-pBase) * pBase**int(k) * (1-pBase)
+                     + (1-pComp) * pComp**int(k) * (1-pComp)))
     table_data = [polyLen, obs, oe]
     # Construct the df with the desired column names & types
     df = pd.DataFrame(data = pd.DataFrame(data = table_data).T)
@@ -294,8 +275,7 @@ def SNRlabelProps(lenToFeats, exclusivePairs = pairs, other = 'Exon'):
     # Initiate the data matrix of zeros, SNRlength x label
     SNRlabels_data = np.zeros(
         (max(lenToFeats.keys()) + 1, len(exclusivePairs) + 1),
-        dtype = int
-        )
+        dtype = int)
     
     # For each length, add up the feats corresponding to the respective labels
     for length, featureCounts in lenToFeats.items():
@@ -313,11 +293,9 @@ def SNRlabelProps(lenToFeats, exclusivePairs = pairs, other = 'Exon'):
     colNames.append(other)
     df = pd.DataFrame(data = SNRlabels_data, columns = colNames)
     # Remove all the lengths that have less than 10 SNRs in them
-    df.drop(
-        labels = [i for i in df.index if df.sum(axis = 1)[i] in range(10)],
-        axis = 0,
-        inplace = True
-        )
+    df.drop(labels = [i for i in df.index if df.sum(axis = 1)[i] in range(10)],
+            axis = 0,
+            inplace = True)
     # Get proportions, instead of absolute values, for each SNR length
     props = df.values / df.values.sum(axis = 1)[:, np.newaxis]
     df_p = pd.DataFrame(data = props, columns = df.columns, index = df.index)
@@ -567,9 +545,7 @@ def getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db, featsOfInterest):
     else:
         flatFeats = collections.defaultdict(
             lambda: collections.defaultdict(
-                lambda: collections.defaultdict()
-                )
-            )
+                lambda: collections.defaultdict()))
         
     # Connect the db
     db_conn = gffutils.FeatureDB(out_db, keep_order = True)
@@ -580,10 +556,8 @@ def getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db, featsOfInterest):
             print('Flattening {}{}s'.format('+' if strd else '-', featType))
             featsByRef = collections.defaultdict(list)
             # Iterate through ALL features of this type, for each strand.
-            for feat in db_conn.all_features(
-                    featuretype = featType,
-                    strand = '+' if strd else '-'
-                    ):
+            for feat in db_conn.all_features(featuretype = featType,
+                                             strand = '+' if strd else '-'):
                 # Add this new feat as a tuple by ref: (start, end), 0-based
                 featsByRef[feat.seqid].append((feat.start - 1, feat.end))
             # Once done for this Type & strd, flatten for each ref & save
@@ -598,13 +572,8 @@ def getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db, featsOfInterest):
     return flatFeats
     
 
-def normalizeLabels(
-        df,
-        out_strandedFeats,
-        out_db = None,
-        fasta = None,
-        exclusivePairs = pairs
-        ):
+def normalizeLabels(df, out_strandedFeats, out_db = None, fasta = None,
+                    exclusivePairs = pairs):
     """Function to calculate what proportion of the genome is covered by each
     of the respective labels and subsequenly normalize the df by these
     proportions. If the flattened feats have not been processed previously,
@@ -638,11 +607,8 @@ def normalizeLabels(
     regions = collections.defaultdict(int)
     
     # First, if not done yet, flatten the relevant features
-    flatFeats = getFlatFeatsByTypeStrdRef(
-        out_strandedFeats,
-        out_db,
-        featsOfInterest
-        )
+    flatFeats = getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db,
+                                          featsOfInterest)
 
     # Add up the cumulative feature length, summing up over strands & refs
     for featType, featsByStrdRef in flatFeats.items():
@@ -662,26 +628,21 @@ def normalizeLabels(
     #  Exon = exons
 
     # The first label in exclusivePairs depends on the length of the genome
-    labelProps = np.array(
-        [(genLen*2 - regions[exclusivePairs[0][0]]) / (genLen*2)]
-        )
+    labelProps = np.array([(genLen*2 - regions[exclusivePairs[0][0]])
+                           / (genLen*2)])
     # Add values for the subsequent labels in exclusivePairs
     for i in range(1,len(exclusivePairs)):
-        labelProps = np.concatenate((labelProps, np.array([
-            (regions[exclusivePairs[i-1][0]] - regions[exclusivePairs[i][0]]) \
-                / (genLen*2)
-            ])))
+        labelProps = np.concatenate((labelProps, np.array(
+            [(regions[exclusivePairs[i-1][0]] - regions[exclusivePairs[i][0]])
+             / (genLen*2)])))
     # Add the last one, which is independent of other labels
-    labelProps = np.concatenate(
-        (labelProps, np.array([regions[exclusivePairs[-1][0]] / (genLen*2)]))
-        )
+    labelProps = np.concatenate((labelProps, np.array(
+        [regions[exclusivePairs[-1][0]] / (genLen*2)])))
     
     # Normalize the df using these proportions
-    df_norm = pd.DataFrame(
-        data = df.values / labelProps[np.newaxis, :],
-        columns = df.columns,
-        index = df.index
-        )
+    df_norm = pd.DataFrame(data = df.values / labelProps[np.newaxis, :],
+                           columns = df.columns,
+                           index = df.index)
     
     return df_norm
 

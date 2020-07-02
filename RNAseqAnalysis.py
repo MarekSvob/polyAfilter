@@ -32,11 +32,8 @@ class NoncGene:
     def __str__(self):
         # Displays the base, number of mismatches, and location
         return '{} NoncGene @{}-{}({})'.format(
-            self.geneFeat.id,
-            self.geneFeat.start,
-            self.geneFeat.end,
-            self.geneFeat.strand
-            )
+            self.geneFeat.id, self.geneFeat.start, self.geneFeat.end,
+            self.geneFeat.strand)
 
 class Transcript:
     """An object that stores information about a transcript.
@@ -50,22 +47,12 @@ class Transcript:
         
     def __str__(self):
         # Displays the base, number of mismatches, and location
-        return '{} Transcript @{}-{}({})'.format(
-            self.geneID,
-            self.start,
-            self.end,
-            self.strand
-            )
+        return '{} Transcript @{}-{}({})'.format(self.geneID, self.start,
+                                                 self.end, self.strand)
 
 
-def filterReads(
-        filt_bamfile,
-        out_db,
-        out_strandedFeats,
-        bamfile,
-        featType = 'exon',
-        concordant = True
-        ):
+def filterReads(filt_bamfile, out_db, out_strandedFeats, bamfile,
+                featType = 'exon', concordant = True):
     """Function to create a bam file from a subset of reads that are aligned
     to a specific feature type on the same or opposite strand.
 
@@ -99,11 +86,8 @@ def filterReads(
         return    
     
     # This will usually just load the file
-    flatFeats = getFlatFeatsByTypeStrdRef(
-        out_strandedFeats,
-        out_db,
-        (featType, )
-        )
+    flatFeats = getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db,
+                                          (featType, ))
     
     # Connect to the bam file
     bam = pysam.AlignmentFile(bamfile, 'rb')
@@ -118,12 +102,8 @@ def filterReads(
     for strd, featsByStrdRef in flatFeats[featType].items():
         # Cycle over the feats under the appropriate key
         for ref, feats in featsByStrdRef.items():
-            print(
-                'Processing {} strand of reference {}'.format(
-                    '+' if strd else '-',
-                    ref
-                    )
-                )
+            print('Processing {} strand of reference {}'.format(
+                '+' if strd else '-', ref))
             for start, end in feats:
                 for read in bam.fetch(contig = ref, start = start, end = end):
                     # Make sure the read is on the correct strand before adding:
@@ -134,8 +114,7 @@ def filterReads(
     filt_reads_list = list(filt_reads)
     # Reads must be sorted for indexing
     filt_reads_list.sort(
-        key = lambda x: (x.reference_id, x.reference_start, x.reference_length)
-        )
+        key = lambda x:(x.reference_id, x.reference_start, x.reference_length))
     
     # Create the bamfile to add the reads
     filt_bam = pysam.AlignmentFile(filt_bamfile, 'wb', template = bam)
@@ -151,13 +130,8 @@ def filterReads(
           '"samtools index {}"'.format(filt_bamfile))
 
 
-def getExpectedCoverage(
-        out_db,
-        out_strandedFeats,
-        bamfile,
-        concordant = True,
-        baselineFeat = 'transcript'
-        ):
+def getExpectedCoverage(out_db, out_strandedFeats, bamfile, concordant = True,
+                        baselineFeat = 'transcript'):
     """Get the per-base expected RNA-seq coverage across the given featuretype.
     
     Parameters
@@ -188,11 +162,8 @@ def getExpectedCoverage(
         return expected
     
     # In most cases, this should just load a file
-    flatFeats = getFlatFeatsByTypeStrdRef(
-        out_strandedFeats,
-        out_db,
-        (baselineFeat, )
-        )
+    flatFeats = getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db,
+                                          (baselineFeat, ))
     
     # Attach a pre-filtered bam file
     bam = pysam.AlignmentFile(bamfile, 'rb')
@@ -202,25 +173,17 @@ def getExpectedCoverage(
 
     # Get the total length of the feats and the total coverage over them
     for strd, featsByRef in flatFeats[baselineFeat].items():
-        print(
-            'Scanning {}{}s for total coverage and length...'.format(
-                '+' if strd else '-',
-                baselineFeat
-                )
-            )
+        print('Scanning {}{}s for total coverage and length...'.format(
+            '+' if strd else '-', baselineFeat))
         for ref, feats in featsByRef.items():
             for start, end in feats:
                 totalLength += end - start
                 totalCoverage += np.sum(
                     bam.count_coverage(
-                        contig = ref,
-                        start = start,
-                        stop = end,
+                        contig = ref, start = start, stop = end,
                         quality_threshold = 0,
-                        read_callback = lambda r: r.is_reverse != strd
-                        ),
-                    dtype = 'int'
-                    )
+                        read_callback = lambda r: r.is_reverse != strd),
+                    dtype = 'int')
     bam.close()
     
     # Normalize the coverage by #SNRs, total coverage, and total length
@@ -232,19 +195,10 @@ def getExpectedCoverage(
     return expected
 
 
-def getCovPerSNR(
-        out_SNRCovLen,
-        out_SNROutl,
-        lenToSNRs,
-        out_db,
-        out_strandedFeats,
-        exonic_bamfile,
-        SNRlengths = range(200),
-        window = 2000,
-        concordant = True,
-        SNRfeat = 'transcript',
-        log10Filter = 3
-        ):
+def getCovPerSNR(out_SNRCovLen, out_SNROutl, lenToSNRs, out_db,
+                 out_strandedFeats, exonic_bamfile, SNRlengths = range(200),
+                 window = 2000, concordant = True, SNRfeat = 'transcript',
+                 log10Filter = 3):
     """Obtain RNA-seq coverage in the vicinity of SNRs of given length.
     
     Parameters
@@ -285,18 +239,14 @@ def getCovPerSNR(
     
     # If the file already exists, simply load
     if os.path.isfile(out_SNRCovLen) and os.path.isfile(out_SNROutl):
-            covByLen = loadPKL(out_SNRCovLen)
-            outlierPeaks = loadPKL(out_SNROutl)
-            return covByLen, outlierPeaks
+        covByLen = loadPKL(out_SNRCovLen)
+        outlierPeaks = loadPKL(out_SNROutl)
+        return covByLen, outlierPeaks
 
     # Get the expected coverage
     expCov = getExpectedCoverage(
-        out_db,
-        out_strandedFeats,
-        exonic_bamfile,
-        concordant = concordant,
-        baselineFeat = SNRfeat
-        )
+        out_db, out_strandedFeats, exonic_bamfile, concordant = concordant,
+        baselineFeat = SNRfeat)
     
     # Attach a pre-filtered bam file
     bam = pysam.AlignmentFile(exonic_bamfile, 'rb')
@@ -311,12 +261,8 @@ def getCovPerSNR(
     for length in sorted(lenToSNRs.keys(), reverse = True):
         if length in SNRlengths:
             # For each length, initialize the count & array for window coverage
-            print(
-                'Going over {} coverage of SNR{}s...'.format(
-                    'concordant' if concordant else 'discordant',
-                    length
-                    )
-                )
+            print('Going over {} coverage of SNR{}s...'.format(
+                'concordant' if concordant else 'discordant', length))
             SNRcount = 0
             zeros = 0
             coverage = np.zeros((window), 'L')
@@ -324,8 +270,8 @@ def getCovPerSNR(
             for SNR in lenToSNRs[length]:
                 # Only consider SNRs in transcripts, as those are the
                 #  sources of internal (concordant or discordant) priming
-                if (concordant and SNRfeat in SNR.concFeats) \
-                    or (not concordant and SNRfeat in SNR.discFeats):
+                if ((concordant and SNRfeat in SNR.concFeats)
+                        or (not concordant and SNRfeat in SNR.discFeats)):
                     # Get the mid point of the SNR wrt/ the reference
                     mid = (SNR.end + SNR.start) // 2
                     start = int(mid - window / 2)
@@ -344,16 +290,13 @@ def getCovPerSNR(
                     # Get the coverage summed over A/T/C/G; count only
                     #  reads on the same (conc) or opposite (disc) strand
                     refCov = np.sum(
-                        bam.count_coverage(
-                            contig = SNR.record,
-                            start = corrStart,
-                            stop = corrStop,
-                            quality_threshold = 0,
-                            read_callback = lambda r: \
-                                r.is_reverse != SNR.strand
-                            ),
-                        axis = 0
-                        )
+                        bam.count_coverage(contig = SNR.record,
+                                           start = corrStart,
+                                           stop = corrStop,
+                                           quality_threshold = 0,
+                                           read_callback = lambda r:
+                                               r.is_reverse != SNR.strand),
+                        axis = 0)
                     totalCount += 1
                     # If this is zero coverage, only add the counts
                     if sum(refCov) == 0:
@@ -365,14 +308,10 @@ def getCovPerSNR(
                         # If the window was out of ref range, fill in the rest
                         if corrStart != start:
                             refCov = np.append(
-                                np.zeros((corrStart - start), 'L'),
-                                refCov
-                                )
+                                np.zeros((corrStart - start), 'L'), refCov)
                         if corrStop != stop:
                             refCov = np.append(
-                                refCov,
-                                np.zeros((stop - corrStop), 'L')
-                                )
+                                refCov, np.zeros((stop - corrStop), 'L'))
                         # Normalize and if needed, flip the coverage to be in
                         #  the 5'->3' orientation wrt/ the transcript feature
                         if SNR.strand == concordant:
@@ -394,23 +333,14 @@ def getCovPerSNR(
     bam.close()
     savePKL(out_SNRCovLen, covByLen)
     savePKL(out_SNROutl, outlierPeaks)
-    print(
-        'Filtered out {:.2%} outliers and {:.2%} SNRs had no coverage.'.format(
-            filteredOut / totalCount,
-            zeroCovs / totalCount
-            )
-        )
+    print('Filtered out {:.2%} outliers and {:.2%} SNRs had no '\
+          'coverage.'.format(filteredOut / totalCount, zeroCovs / totalCount))
     
     return covByLen, outlierPeaks
 
 
-def getCovPerTran(
-        out_TranCov,
-        out_db,
-        out_strandedFeats,
-        exonic_bamfile,
-        window = 2000
-        ):
+def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
+                  window = 2000):
     """Function that aggregates all per-transcript coverage.
 
     Parameters
@@ -438,20 +368,13 @@ def getCovPerTran(
         return normCov
     
     # Get the expected coverage
-    expCov = getExpectedCoverage(
-        out_db,
-        out_strandedFeats,
-        exonic_bamfile,
-        concordant = True,
-        baselineFeat = 'transcript'
-        )
+    expCov = getExpectedCoverage(out_db, out_strandedFeats, exonic_bamfile,
+                                 concordant = True,
+                                 baselineFeat = 'transcript')
     
     # In most cases, this should just load a file
-    flatFeats = getFlatFeatsByTypeStrdRef(
-        out_strandedFeats,
-        out_db,
-        ('transcript', )
-        )
+    flatFeats = getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db,
+                                          ('transcript', ))
     
     # Attach a pre-filtered bam file
     bam = pysam.AlignmentFile(exonic_bamfile, 'rb')
@@ -461,9 +384,8 @@ def getCovPerTran(
     coverage = np.zeros((window), 'L')
     
     for strd, featsByRef in flatFeats['transcript'].items():
-        print(
-            'Going over coverage of {}transcripts'.format('+' if strd else '-')
-            )
+        print('Going over coverage of {}transcripts'.format(
+            '+' if strd else '-'))
         for ref, feats in featsByRef.items():
             refLen = bam.get_reference_length(ref)
             for feat in feats:
@@ -485,27 +407,21 @@ def getCovPerTran(
                     corrStop = stop
                 # Get the coverage summed over A/T/C/G; count only concordant
                 refCoverage = np.sum(
-                    bam.count_coverage(
-                        contig = ref,
-                        start = corrStart,
-                        stop = corrStop,
-                        quality_threshold = 0,
-                        read_callback = lambda r: r.is_reverse != strd
-                        ),
-                    axis = 0
-                    )
+                    bam.count_coverage(contig = ref,
+                                       start = corrStart,
+                                       stop = corrStop,
+                                       quality_threshold = 0,
+                                       read_callback = lambda r:
+                                           r.is_reverse != strd),
+                    axis = 0)
                 transCount += 1
                 # If the window was out of the ref range, fill in the rest
                 if corrStart == 0:
-                    refCoverage = np.append(
-                        np.zeros((0 - start), 'L'),
-                        refCoverage
-                        )
+                    refCoverage = np.append(np.zeros((0 - start), 'L'),
+                                            refCoverage)
                 if corrStop != stop:
-                    refCoverage = np.append(
-                        refCoverage,
-                        np.zeros((stop - corrStop), 'L')
-                        )
+                    refCoverage = np.append(refCoverage,
+                                            np.zeros((stop - corrStop), 'L'))
                 # If needed, flip the coverage to be in the 5'->3'
                 #  orientation wrt/ the transcript feature direction
                 if not strd:
@@ -521,15 +437,8 @@ def getCovPerTran(
     return normCov
 
 
-def getNonCanCovGenes(
-        out_NonCanCovGenes,
-        lenToSNRs,
-        out_db,
-        bamfile,
-        lastBP = 250,
-        covThreshold = 0.05,
-        minLen = 0
-        ):
+def getNonCanCovGenes(out_NonCanCovGenes, lenToSNRs, out_db, bamfile,
+                      lastBP = 250, covThreshold = 0.05, minLen = 0):
     """Function to scan each gene with SNRs and determine what proportion of
     its non-canonical RNA-seq coverage may be accounted for by SNRs.
 
@@ -589,16 +498,13 @@ def getNonCanCovGenes(
         gene0start = geneFeat.start - 1     # Conversion to 0-based
         gene0end = geneFeat.end             # Conversion to 0-based
         geneBPcov = np.sum(
-            bam.count_coverage(
-                contig = geneFeat.seqid,
-                start = gene0start,
-                stop = gene0end,
-                quality_threshold = 0,
-                read_callback = lambda r:
-                    r.is_reverse == (geneFeat.strand == '-')
-                ),
-            axis = 0
-            )
+            bam.count_coverage(contig = geneFeat.seqid,
+                               start = gene0start,
+                               stop = gene0end,
+                               quality_threshold = 0,
+                               read_callback = lambda r:
+                                   r.is_reverse == (geneFeat.strand == '-')),
+            axis = 0)
         # If there's no gene coverage, skip
         geneCoverage = sum(geneBPcov)
         if geneCoverage == 0:
@@ -611,23 +517,17 @@ def getNonCanCovGenes(
         for trans in db.features_of_type(
                 featuretype = 'transcript',
                 limit = (geneFeat.seqid, gene0start, gene0end),
-                strand = geneFeat.strand
-                ):
+                strand = geneFeat.strand):
             # Extract the exons as (start, end); 1- => 0-based
-            exons = sorted(
-                [(e.start - 1, e.end) for e in db.children(
-                    trans,
-                    featuretype = 'exon'
-                    )],
-                reverse = strd      # Order from last to 1st wrt/ the strand
-                )
+            exons = sorted([(e.start - 1, e.end) for e
+                            in db.children(trans, featuretype = 'exon')],
+                           reverse = strd) # Order from last to 1st wrt/ strand
             trans0start = trans.start - 1       # Conversion to 0-based
             trans0end = trans.end               # Conversion to 0-based
             [geneID] = trans.attributes['gene_id']
             # Save all transcripts (lite) on the same strand as the gene
-            transcripts.append(
-                Transcript(geneID, trans.seqid, trans0start, trans0end, exons)
-                )
+            transcripts.append(Transcript(geneID, trans.seqid, trans0start,
+                                          trans0end, exons))
             # Determine the transcripts's exon-wise end
             remaining = lastBP
             covStart = None
@@ -637,8 +537,8 @@ def getNonCanCovGenes(
                 if exLen < remaining:
                     remaining -= exLen
                 else:
-                    covStart = exon[1] - remaining if strd \
-                        else exon[0] + remaining
+                    covStart = (exon[1] - remaining if strd
+                                else exon[0] + remaining)
                     break
             # If we have exhausted all exons, take the beginning of the tran
             else:
@@ -646,15 +546,11 @@ def getNonCanCovGenes(
             # Only add the ending if the transcripts's exon-wise end is not
             #  beyond the gene end (in case it is from another gene)
             if strd and covStart < gene0end:
-                newEnding = (
-                    max(covStart, gene0start),
-                    min(trans0end, gene0end)
-                    )
+                newEnding = (max(covStart, gene0start),
+                             min(trans0end, gene0end))
             elif not strd and covStart > gene0start:
-                newEnding = (
-                    max(trans0start, gene0start),
-                    min(covStart, gene0end)
-                    )
+                newEnding = (max(trans0start, gene0start),
+                             min(covStart, gene0end))
             else:
                 continue
             Tendings.append(newEnding)
@@ -665,14 +561,9 @@ def getNonCanCovGenes(
         for covS, covE in Tendings:
             endCoverage += np.sum(
                 bam.count_coverage(
-                    contig = geneFeat.seqid,
-                    start = covS,
-                    stop = covE,
-                    quality_threshold = 0,
-                    read_callback = lambda r:
-                        r.is_reverse == (geneFeat.strand == '-')
-                    )
-                )
+                    contig = geneFeat.seqid, start = covS, stop = covE,
+                    quality_threshold = 0, read_callback = lambda r:
+                        r.is_reverse == (geneFeat.strand == '-')))
         totalSNRcovProp = 0
         lenToCovSNRs = {}
         # Extract and merge the SNR endings by length
@@ -681,15 +572,11 @@ def getNonCanCovGenes(
             if length >= minLen:
                 for snr in snrs:
                     if strd and snr.start > gene0start:
-                        newSNRe = (
-                            max(snr.start - lastBP, gene0start),
-                            min(snr.start, gene0end)
-                            )
+                        newSNRe = (max(snr.start - lastBP, gene0start),
+                                   min(snr.start, gene0end))
                     elif not strd and snr.end < gene0end:
-                        newSNRe = (
-                            max(snr.end, gene0start),
-                            min(snr.end + lastBP, gene0end)
-                            )
+                        newSNRe = (max(snr.end, gene0start),
+                                   min(snr.end + lastBP, gene0end))
                     else:
                         continue
                     # Add the new ending to the list without overlap
@@ -704,13 +591,10 @@ def getNonCanCovGenes(
                     snrCoverage += np.sum(
                         bam.count_coverage(
                             contig = geneFeat.seqid,
-                            start = covS,
-                            stop = covE,
+                            start = covS, stop = covE,
                             quality_threshold = 0,
                             read_callback = lambda r:
-                                r.is_reverse == (geneFeat.strand == '-')
-                            )
-                        )
+                                r.is_reverse == (geneFeat.strand == '-')))
                 prop = snrCoverage / (geneCoverage - endCoverage)
                 totalSNRcovProp += prop
                 lenToCovSNRs[length] = (prop, snrs)
@@ -719,11 +603,8 @@ def getNonCanCovGenes(
         #  Note that the SNR coverage between lengths may overlap, so this is
         #  only an estimate
         if totalSNRcovProp >= covThreshold:
-            nonCanCovGenes.append(
-                NoncGene(
-                    geneFeat, geneBPcov, transcripts, lenToCovSNRs, Tendings
-                    )
-                )
+            nonCanCovGenes.append(NoncGene(geneFeat, geneBPcov, transcripts,
+                                           lenToCovSNRs, Tendings))
     bam.close()
     savePKL(out_NonCanCovGenes, nonCanCovGenes)
     
@@ -786,27 +667,20 @@ def getBaselineData(out_transBaselineData, out_db, bamfile):
             for trans in db.features_of_type(
                 featuretype = 'transcript',
                 limit = (refname, 1, bam.get_reference_length(refname)),
-                strand = '+' if strd else '-'
-                ):
+                strand = '+' if strd else '-'):
                 # Extract exons from the transcript, last-to-first
-                exons = sorted(
-                    [(e.start - 1, e.end) for e in db.children(
-                        trans,
-                        featuretype = 'exon'
-                        )],
-                    reverse = strd
-                    )
+                exons = sorted([(e.start - 1, e.end) for e
+                                in db.children(trans, featuretype = 'exon')],
+                               reverse = strd)
                 eCov = 0
                 for start, end in exons:
                         eCov += np.sum(
-                            bam.count_coverage(
-                                contig = refname,
-                                start = start,
-                                stop = end,
-                                quality_threshold = 0,
-                                read_callback = lambda r: r.is_reverse != strd
-                                )
-                            )
+                            bam.count_coverage(contig = refname,
+                                               start = start,
+                                               stop = end,
+                                               quality_threshold = 0,
+                                               read_callback = lambda r:
+                                                   r.is_reverse != strd))
                 # Only transcripts with ANY exonic coverage are considered here
                 if eCov == 0:
                     continue
@@ -815,33 +689,27 @@ def getBaselineData(out_transBaselineData, out_db, bamfile):
                 [geneID] = trans.attributes['gene_id']
                 # Save this transcript to the list of covered transcripts
                 covTransByStrdRef[strd][refname].append(
-                    Transcript(geneID, trans0start, trans0end, exons)
-                    )
+                    Transcript(geneID, trans0start, trans0end, exons))
                 # Add these exons in the ref-wide exon list
                 covExonsByStrdRef[strd][refname].extend(exons)
             # Once complete for this strd/ref, flatten the ref-wide exon list
             covExonsByStrdRef[strd][refname] = flattenIntervals(
-                covExonsByStrdRef[strd][refname]
-                )
+                covExonsByStrdRef[strd][refname])
             # Get the non/coverage of these exons to speed up future processing
             for start, end in covExonsByStrdRef[strd][refname]:
                 exonicCov = np.sum(
-                    bam.count_coverage(
-                        contig = refname,
-                        start = start,
-                        stop = end,
-                        quality_threshold = 0,
-                        read_callback = lambda r: r.is_reverse != strd
-                        ),
-                    axis = 0
-                    )
+                    bam.count_coverage(contig = refname,
+                                       start = start,
+                                       stop = end,
+                                       quality_threshold = 0,
+                                       read_callback = lambda r:
+                                           r.is_reverse != strd),
+                    axis = 0)
                 Pos += np.sum(exonicCov)
                 Neg += np.count_nonzero(exonicCov == 0)
     
-    savePKL(
-        out_transBaselineData,
-        (covTransByStrdRef, covExonsByStrdRef, Pos, Neg)
-        )
+    savePKL(out_transBaselineData,
+            (covTransByStrdRef, covExonsByStrdRef, Pos, Neg))
     
     return covTransByStrdRef, covExonsByStrdRef, Pos, Neg
     
@@ -927,7 +795,7 @@ def getTransEndSensSpec(endLength, bamfile, BLdata):
                 # For each exon (which are ordered last-to-first wrt/ strand)
                 for eStart, eEnd in Trans.exons:
                     exLen = eEnd - eStart
-                    # If it is not longer than the remaider, add the entire
+                    # If it is not longer than the remainder, add the entire
                     #  exon & decrease the remainder
                     if exLen < remaining:
                         transEndPieces.append((eStart, eEnd))
@@ -935,9 +803,8 @@ def getTransEndSensSpec(endLength, bamfile, BLdata):
                     # Otherwise add only the remaining piece of the exon
                     else:
                         transEndPieces.append(
-                            (eEnd - remaining, eEnd) if strd \
-                                else (eStart, eStart + remaining)
-                            )
+                            (eEnd - remaining, eEnd) if strd
+                            else (eStart, eStart + remaining))
                         break
             
             # Flatten the transEndPieces
@@ -945,24 +812,20 @@ def getTransEndSensSpec(endLength, bamfile, BLdata):
             # For each reference (on each strand), extract and add the exon
             #  coverage and non-covBP for the exon-wise end pieces
             for pStart, pEnd in transEndPieces:
-                endsCov = np.sum(
-                    bam.count_coverage(
-                        contig = refname,
-                        start = pStart,      # already 0-based
-                        stop = pEnd,
-                        quality_threshold = 0,
-                        read_callback = lambda r: r.is_reverse != strd
-                        ),
-                    axis = 0
-                    )
+                endsCov = np.sum(bam.count_coverage(contig = refname,
+                                                    start = pStart,
+                                                    stop = pEnd,
+                                                    quality_threshold = 0,
+                                                    read_callback = lambda r:
+                                                        r.is_reverse != strd),
+                                 axis = 0)
                 TP += np.sum(endsCov)
                 FP += np.count_nonzero(endsCov == 0)
             # Remove the portions of flattened exons overlapped by
             #  endpieces and save as starts
             transStartsByStrdRef[strd][refname] = removeOverlaps(
                 covExonsByStrdRef[strd][refname],
-                transEndPieces
-                )
+                transEndPieces)
             
     bam.close()
     # Calculate the results
@@ -974,15 +837,8 @@ def getTransEndSensSpec(endLength, bamfile, BLdata):
     return sensitivity, specificity, transStartsByStrdRef, FN, TN
 
 
-def getTransEndROC(
-        out_TransEndROC,
-        out_transBaselineData,
-        out_db,
-        bamfile,
-        endLenMin,
-        endLenMax,
-        results = {}
-        ):
+def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
+                   endLenMin, endLenMax, tROC = {}, product = False):
     """Gradient descent-like wrapper funciton around getTransEndSensSpec() to
     manage result generation & collection. This function maximizes Youden's J
     statistic (Sensitivity + Specificity - 1) across exon-wise transcript
@@ -1005,35 +861,33 @@ def getTransEndROC(
         The minimal estimated length of exon-wise transcript ends to consider.
     endLenMax : (int)
         The maximum estimated length of exon-wise transcript ends to consider.
-    results : (dict), optional
+    tROC : (dict), optional
         { endLen : ( Sensitivity, Specificity, Accuracy ) }. The default is {}.
+    product : (bool), optional
+        Indicates whether the optimization is guided by maximizing the product
+        of Sens*Spec; otherwise the J statistic (Sens+Spec-1) is used. The
+        default is False.
 
     Returns
     -------
-    results : (dict)
+    tROC : (dict)
         { endLen : ( Sensitivity, Specificity, Accuracy ) }
     """
     
     # If the file already exists, simply load
     if os.path.isfile(out_TransEndROC):
-        results = loadPKL(out_TransEndROC)
-        return results
+        tROC = loadPKL(out_TransEndROC)
+        return tROC
     
     # Get the baseline data
-    BLdata = getBaselineData(
-        out_transBaselineData,
-        out_db,
-        bamfile
-        )
+    BLdata = getBaselineData(out_transBaselineData, out_db, bamfile)
     
     # Start with min, mid, and max and then apply the repetitive algorithm
     #  until 'covergence'
-    for endLen in (
-        endLenMin,
-        np.mean((endLenMin, endLenMax), dtype = int),
-        endLenMax
-        ):
-        results[endLen] = getTransEndSensSpec(endLen, bamfile, BLdata)
+    for endLen in (endLenMin,
+                   np.mean((endLenMin, endLenMax), dtype = int),
+                   endLenMax):
+        tROC[endLen] = getTransEndSensSpec(endLen, bamfile, BLdata)
         
     # Always look at the midpoint between the endLen with the largest
     #  Sens*Spec product and an adjacent endLen, alternating above or below.
@@ -1049,12 +903,10 @@ def getTransEndROC(
     # Run the while loop until both optLen+/-1 have been checked and neither
     #  is better than optLen ~ the optimum has been found with max resolution
     while not all(checkedJustAboveBelow):
-        checkedLens = sorted(results)
-        # Get the current most optimal endLen using the J statistic
-        optLen = max(
-            checkedLens,
-            key = lambda l: results[l][0] + results[l][1] - 1
-            )
+        checkedLens = sorted(tROC)
+        # Get the current most optimal endLen using the J statistic or product
+        optLen = max(tROC, key = lambda l: (tROC[l][0] * tROC[l][1] if product
+                                            else tROC[l][0] + tROC[l][1] - 1))
         print('The current optimal end length is {}.'.format(optLen))
         # If the new opt is different from the old, reset the indicators & save
         #  the new "old"; otherwise just flip the direction to look further
@@ -1071,9 +923,8 @@ def getTransEndROC(
         # If the adjacent endLen does not exist in the given direction, look
         #  as far as an existing adjacent value in the opposite direction
         if j in (-1, len(checkedLens)):
-            lenToC = optLen + (
-                optLen - checkedLens[i + (-1, 1)[not lookAbove]]
-                )
+            lenToC = optLen + (optLen
+                               - checkedLens[i + (-1, 1)[not lookAbove]])
         # Otherwise just look between the optimal & adjacent endLen
         else:
             lenToC = np.mean((optLen, checkedLens[j]), dtype = int)
@@ -1084,27 +935,19 @@ def getTransEndROC(
         #  or optLen-1 (if lookAbove = False), so don't check it again & only
         #  mark that an immediately adjacent value has already been checked
         if lenToC in checkedLens:
-            print(
-                'End length of {} has already been checked.'.format(
-                    (lenToC, checkedLens[j])[lookAbove]
-                    )
-                )
+            print('End length of {} has already been checked.'.format(
+                (lenToC, checkedLens[j])[lookAbove]))
             checkedJustAboveBelow[lookAbove] = True
         else:
-            results[lenToC] = getTransEndSensSpec(lenToC, bamfile, BLdata)
+            tROC[lenToC] = getTransEndSensSpec(lenToC, bamfile, BLdata)
     
     print('The optimal end length is {}.'.format(optLen))
-    savePKL(out_TransEndROC, results)
+    savePKL(out_TransEndROC, tROC)
     
-    return results
+    return tROC
 
 
-def getSNREndROC(
-        tROC,
-        lenToSNRs,
-        out_SNREndROC,
-        bamfile
-        ):
+def getSNREndROC(tROC, lenToSNRs, out_SNREndROC, bamfile, product = False):
     """This alhorithm simply goes over ALL SNR lengths exactly once. This is
     different from the transcript end algorithm, where there are many more
     possibilities and info on one end length is relatively independent of the
@@ -1127,19 +970,20 @@ def getSNREndROC(
 
     Returns
     -------
-    results : (dict)
+    snrROC : (dict)
         { covLength : (sensitivity, specificity) }
     """
     
     # If the file already exists, simply load
     if os.path.isfile(out_SNREndROC):
-        results = loadPKL(out_SNREndROC)
-        return results
+        snrROC = loadPKL(out_SNREndROC)
+        return snrROC
     
-    results = {}
+    snrROC = {}
     
     # Get the optimal length using the J statistic & announce
-    optEndLen = max(tROC, key = lambda l: tROC[l][0] + tROC[l][1] - 1)
+    optEndLen = max(tROC, key = lambda l: (tROC[l][0] * tROC[l][1] if product
+                                           else tROC[l][0] + tROC[l][1] - 1))
     print('The optimal coverage distance length is {}. Getting ROC across ' \
           'SNR lengths...'.format(optEndLen))
     # Extract the transROC data for this length
@@ -1148,8 +992,7 @@ def getSNREndROC(
     #  non-canonical coverage. For SNRs at each length, flatten the SNRends and
     #  then find where they overlap with the transStarts & get the coverage
     SNRpiecesByStrdRef = collections.defaultdict(
-        lambda: collections.defaultdict(list)
-        )
+        lambda: collections.defaultdict(list))
     Pos = tROC[optEndLen][3]
     Neg = tROC[optEndLen][4]
     # "POSITIVE" ~ Inside exon-wise SNR pieces
@@ -1186,15 +1029,13 @@ def getSNREndROC(
                 # Measure the coverage of the new pieces
                 for pStart, pEnd in newSNRpieces:
                     pieceCov = np.sum(
-                        bam.count_coverage(
-                            contig = refName,
-                            start = pStart,      # already 0-based
-                            stop = pEnd,
-                            quality_threshold = 0,
-                            read_callback = lambda r: r.is_reverse != strd
-                            ),
-                        axis = 0
-                        )
+                        bam.count_coverage(contig = refName,
+                                           start = pStart,   # already 0-based
+                                           stop = pEnd,
+                                           quality_threshold = 0,
+                                           read_callback = lambda r:
+                                               r.is_reverse != strd),
+                        axis = 0)
                     # Adjust the TP & TN accordingly
                     TP += np.sum(pieceCov)
                     TN -= np.count_nonzero(pieceCov == 0)
@@ -1202,20 +1043,17 @@ def getSNREndROC(
                 SNRpiecesByStrdRef[strd][refName].extend(newSNRpieces)
                 # Flatten the SNRs (should contain no overlaps, only adjacency)
                 SNRpiecesByStrdRef[strd][refName] = flattenIntervals(
-                    SNRpiecesByStrdRef[strd][refName]
-                    )
+                    SNRpiecesByStrdRef[strd][refName])
         # Save the results
         sensitivity = TP / Pos
         specificity = TN / Neg
         
-        results[length] = sensitivity, specificity
+        snrROC[length] = sensitivity, specificity
     
     bam.close()
     # Announce the optimal SNR length using the J statistic
-    print(
-        'The optimal SNR length is {}.'.format(
-            max(results, key = lambda l: results[l][0] + results[l][1] - 1)
-            )
-        )
+    print('The optimal SNR length is {}.'.format(max(
+        snrROC, key = lambda l: (snrROC[l][0] * snrROC[l][1] if product
+                                 else snrROC[l][0] + snrROC[l][1] - 1))))
     
-    return results
+    return snrROC
