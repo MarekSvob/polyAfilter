@@ -515,7 +515,7 @@ def removeOverlaps(aIntervals, bIntervals):
             # Otherwise the bStart must be inside the aInt; if the bEnd is also
             #  inside the aInt, add the left aInt overhang and update the start
             elif bEnd < aEnd:
-                nonOverlaps.append(noStart, bStart)
+                nonOverlaps.append((noStart, bStart))
                 noStart = bEnd
                 bI += 1
                 if bI < lenOfB:
@@ -526,12 +526,12 @@ def removeOverlaps(aIntervals, bIntervals):
             #  bStart is inside, so add the aInt up to the bStart BUT again,
             #  do not move onto the following bInterval just yet!
             else:
-                nonOverlaps.append(noStart, bStart)
+                nonOverlaps.append((noStart, bStart))
                 break
         # Once a bInt outside the aInterval is reached, add the non-overlapped
         #  portion of the current aInterval and go to the next aInterval
         else:
-            nonOverlaps.append(noStart, aEnd)
+            nonOverlaps.append((noStart, aEnd))
             
     return nonOverlaps
 
