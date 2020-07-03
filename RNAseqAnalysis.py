@@ -642,7 +642,7 @@ def getBaselineData(out_transBaselineData, out_db, bamfile):
     if os.path.isfile(out_transBaselineData):
         covTransByStrdRef, covExonsByStrdRef, Pos, Neg = loadPKL(
             out_transBaselineData)
-        return Pos, Neg, covTransByStrdRef, covExonsByStrdRef
+        return covTransByStrdRef, covExonsByStrdRef, Pos, Neg
     
     # Otherwise initialize the variables    
     print('Getting baseline data for ROC across '\
