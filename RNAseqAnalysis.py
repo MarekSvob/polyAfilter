@@ -640,7 +640,8 @@ def getBaselineData(out_transBaselineData, out_db, bamfile):
     
     # If the file already exists, simply load
     if os.path.isfile(out_transBaselineData):
-        covTransByStrdRef, covExonsByStrdRef = loadPKL(out_transBaselineData)
+        covTransByStrdRef, covExonsByStrdRef, Pos, Neg = loadPKL(
+            out_transBaselineData)
         return covTransByStrdRef, covExonsByStrdRef
     
     # Otherwise initialize the variables    
@@ -887,7 +888,8 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     for endLen in (endLenMin,
                    np.mean((endLenMin, endLenMax), dtype = int),
                    endLenMax):
-        tROC[endLen] = getTransEndSensSpec(endLen, bamfile, BLdata)
+        if endLen not in tROC:
+            tROC[endLen] = getTransEndSensSpec(endLen, bamfile, BLdata)
         
     # Always look at the midpoint between the endLen with the largest
     #  Sens*Spec product and an adjacent endLen, alternating above or below.
@@ -1055,5 +1057,6 @@ def getSNREndROC(tROC, lenToSNRs, out_SNREndROC, bamfile, product = False):
     print('The optimal SNR length is {}.'.format(max(
         snrROC, key = lambda l: (snrROC[l][0] * snrROC[l][1] if product
                                  else snrROC[l][0] + snrROC[l][1] - 1))))
+    savePKL(out_SNREndROC, snrROC)
     
     return snrROC
