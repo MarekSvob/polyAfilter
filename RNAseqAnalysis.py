@@ -1196,9 +1196,8 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                 # Remove the transcript starts from the original dict to
                 #  increase efficiency (not to try to "rediscover" them again
                 #  in the future, since they are already added)
-                eachTransStartByStrdRef[strd][ref] = [
-                    tS for tS in eachTransStartByStrdRef[strd][ref]
-                    if tS not in toRemove]
+                eachTransStart = [tS for tS in eachTransStart
+                                  if tS not in toRemove]
                 
                 # Flatten the ovSNRpieces
                 ovSNRpieces = flattenIntervals(ovSNRpieces)
