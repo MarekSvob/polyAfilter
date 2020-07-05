@@ -677,3 +677,6 @@ def getSNRsByGeneLen(lenToSNRs, concordant = True):
                 geneLenToSNRs[gene][length].append(snr)
     
     return geneLenToSNRs
+
+
+

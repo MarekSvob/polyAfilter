@@ -666,9 +666,9 @@ def getBaselineData(out_transBaselineData, out_db, bamfile):
         for refname in references:
             # Process this transcript only if it has ANY exonic coverage
             for trans in db.features_of_type(
-                featuretype = 'transcript',
-                limit = (refname, 1, bam.get_reference_length(refname)),
-                strand = '+' if strd else '-'):
+                    featuretype = 'transcript',
+                    limit = (refname, 1, bam.get_reference_length(refname)),
+                    strand = '+' if strd else '-'):
                 # Extract exons from the transcript, last-to-first
                 exons = sorted([(e.start - 1, e.end) for e
                                 in db.children(trans, featuretype = 'exon')],
@@ -790,11 +790,11 @@ def getTransEndSensSpec(endLength, bamfile, BLdata):
             transEndPieces = []
             # Iterate through previously found transcripts to extract &
             #  save flattened exon-wise endpieces of given length for each
-            for Trans in trans:
+            for Tran in trans:
                 # Initiate how much is left to progress from the end
                 remaining = int(endLength)
-                # For each exon (which are ordered last-to-first wrt/ strand)
-                for eStart, eEnd in Trans.exons:
+                # For each exon (ordered last-to-first wrt/ strand)
+                for eStart, eEnd in sorted(Tran.exons, reverse = strd):
                     exLen = eEnd - eStart
                     # If it is not longer than the remainder, add the entire
                     #  exon & decrease the remainder
@@ -1025,9 +1025,7 @@ def getSNREndROC(tROC, lenToSNRs, out_SNREndROC, bamfile, product = False):
                 newSNRpieces = getOverlaps(newSNRpieces, transStarts)
                 # Remove already covered areas so only new ones are measured
                 newSNRpieces = removeOverlaps(
-                    newSNRpieces,
-                    SNRpiecesByStrdRef[strd][refName]
-                    )                
+                    newSNRpieces, SNRpiecesByStrdRef[strd][refName])                
                 # Measure the coverage of the new pieces
                 for pStart, pEnd in newSNRpieces:
                     pieceCov = np.sum(
@@ -1058,5 +1056,177 @@ def getSNREndROC(tROC, lenToSNRs, out_SNREndROC, bamfile, product = False):
         snrROC, key = lambda l: (snrROC[l][0] * snrROC[l][1] if product
                                  else snrROC[l][0] + snrROC[l][1] - 1))))
     savePKL(out_SNREndROC, snrROC)
+    
+    return snrROC
+
+
+def getSNRcovByGene(covLen, BLdata, lenToSNRs, bamfile):
+    """This function gets Sensitivity & Specificity of coverage accounted for
+    by SNRs in genes (expressed transcripts) in which they occur.
+    
+    Parameters
+    ----------
+    covLen : (int)
+        The optimal length of coverage with respect to the potential priming
+        location.
+    BLdata : (tuple)
+        (covTransByStrdRef, covExonsByStrdRef, Pos, Neg)
+    lenToSNRs : (dict)
+        { SNR length : [ SNR ] }
+    bamfile : (str)
+        Location of the bamfile to be scanned.
+
+    Returns
+    -------
+    snrROC : (dict)
+        { SNR length : (Sensitivity, Specificity) }
+    """
+    
+    print('Extracting the exons up to the last {} bp of each expressed' \
+          ' transcript...'.format(covLen))
+    # Get the list of full transcripts by strd & ref
+    covTransByStrdRef = BLdata[0]
+    # Precalculate starts (one sorted list of tuples) for each expressed
+    #  transcript based on the optimal endLen & save by strd & ref
+    eachTransStartByStrdRef = collections.defaultdict(
+        lambda: collections.defaultdict(list))
+    for strd, covTransByRef in covTransByStrdRef.items():
+        for ref, trans in covTransByRef.items():
+            for Tran in trans:
+                # Initialize the list of start exons
+                startPieces = []
+                # Initiate how much is left to progress to escape the end
+                remaining = int(covLen)
+                # For each exon (ordered last-to-first wrt/ strand)
+                for eStart, eEnd in sorted(Tran.exons, reverse = strd):
+                    # If end has not been escaped yet
+                    if remaining > 0:
+                        # Measure the size of the exon
+                        exLen = eEnd - eStart
+                        # If longer than the remainder, add the escaped part of
+                        #  the exon
+                        if exLen > remaining:
+                            startPieces.append(
+                                (eStart, eEnd - remaining) if strd
+                                else (eStart + remaining, eEnd))
+                        # Either way, decrease the remainder by the exon length
+                        remaining -= exLen
+                    # Otherwise add the entire exon as is
+                    else:
+                        startPieces.append((eStart, eEnd))
+                # Append (not extend!) each to retain transcript identity
+                eachTransStartByStrdRef.append(startPieces)
+    
+    # Initialize the SNRpieces found on covered exons by strd & ref - coverage
+    #  of these will consitute TP & FP measurements
+    SNRpiecesByStrdRef = collections.defaultdict(
+        lambda: collections.defaultdict(list))
+    # Initialize the associated measurements that'll be added to over SNR lens
+    TP = 0
+    FP = 0
+    # Initialize the flattened transStarts whose transcripts had SNRpieces -
+    #  coverage of these will constitute the baseline/denominator for Sens/Spec
+    flatTransStartsByStrdRef = collections.defaultdict(
+        lambda: collections.defaultdict(list))
+    # Initialize the associated measurements that'll be added to over SNR lens
+    Pos = 0
+    Neg = 0
+    # Initialize the ROC results dict
+    snrROC = {}
+    # Load the bamfile
+    bam = pysam.AlignmentFile(bamfile, 'rb')
+    # Go over SNRs by length, from longest to shortest
+    for length in sorted(lenToSNRs, reverse = True):
+        print('Getting Sensitivity & Specificity for SNRs of length' \
+              ' {}...'.format(length))
+        # For each length, go over each strd & ref of trans starts
+        for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
+            for refName, eachTransStart in eachTransStartByRef.items():
+                # Initialize the list if SNR pieces *specific* for this SNR len
+                newSNRpieces = []
+                # Filter & extract the SNR pieces for each strd/ref
+                for SNR in lenToSNRs[length]:
+                    # Filter the SNRs by strd and ref
+                    if SNR.strand == strd and SNR.record == refName:
+                        start = SNR.start - covLen if strd else SNR.end
+                        end = SNR.start if strd else SNR.end + covLen
+                        newSNRpieces.append((start, end))
+                # Flatten the newSNRpieces
+                newSNRpieces = flattenIntervals(newSNRpieces)
+                # Determine which portions are NEW for this strd/ref - only
+                #  those will contribute to
+                #  - adding new transcript starts (exons) and
+                #  - new TP/FP coverage information
+                newSNRpieces = removeOverlaps(
+                    newSNRpieces, SNRpiecesByStrdRef[strd][refName])
+                # These SNR pieces, specific for this SNR length, can overlap
+                #  either the already included (flat list) trans starts, or
+                #  some of the new ones (each list), or both (!)
+                
+                # Retain overlaps with previously added (flat list) exons:
+                #  positive selection of SNR pieces based on old transStarts
+                ovSNRpieces = getOverlaps(newSNRpieces,
+                                          flatTransStartsByStrdRef[strd][ref])
+                
+                # Initialize the list of tStarts *specific* for this SNR len
+                newTstarts = []
+                # For *each* transcript start that had not been added yet:
+                #  positive selection of new transStarts and  SNR pieces based
+                #  on mutual overlap (note: tran is a list of exons)
+                for tran in eachTransStart:
+                    # Get the overlaps with SNR pieces specific for this length
+                    SNRsInNewTransStart = getOverlaps(newSNRpieces, tran)
+                    # If there are any,
+                    if SNRsInNewTransStart != []:
+                        # Add the overlap to the overlapped SNRpieces
+                        ovSNRpieces.extend(SNRsInNewTransStart)
+                        # Add the transcript start to the tStarts aggregate
+                        newTstarts.extend(tran)
+                        # Remove the transcript start from the original dict to
+                        #  increase efficiency (not to try to "rediscover" it
+                        #  again in the future, since it is already added)
+                        eachTransStartByStrdRef[strd][ref].remove(tran)
+                
+                # Flatten the ovSNRpieces
+                ovSNRpieces = flattenIntervals(ovSNRpieces)
+                # Measure the contribution of the ovSNRpieces specific for this
+                #  SNR length to the total TP/FP
+                for ovStart, ovEnd in ovSNRpieces:
+                    pieceCov = np.sum(
+                        bam.count_coverage(contig = refName,
+                                           start = ovStart,   # already 0-based
+                                           stop = ovEnd,
+                                           quality_threshold = 0,
+                                           read_callback = lambda r:
+                                               r.is_reverse != strd),
+                        axis = 0)
+                    # Adjust the TP & FP accordingly
+                    TP += np.sum(pieceCov)
+                    FP += np.count_nonzero(pieceCov == 0)
+                    
+                # Flatten the newTstarts
+                newTstarts = flattenIntervals(newTstarts)
+                # Remove the overlaps with the previously added tStarts
+                newTstarts = removeOverlaps(
+                    newTstarts, flatTransStartsByStrdRef[strd][ref])
+                # Measure how much only the newTstarts, specific to this SNR
+                #  length, contribute to the total Pos/Neg
+                for tStart, tEnd in newTstarts:
+                    tCov = np.sum(
+                        bam.count_coverage(contig = refName,
+                                           start = tStart,   # already 0-based
+                                           stop = tEnd,
+                                           quality_threshold = 0,
+                                           read_callback = lambda r:
+                                               r.is_reverse != strd),
+                        axis = 0)
+                    # Adjust the Pos & Neg accordingly
+                    Pos += np.sum(tCov)
+                    Neg += np.count_nonzero(tCov == 0)
+        # Calculate the Sens & Spec at this minimal SNR length and save
+        TN = Neg - FP
+        Sens = TP / Pos
+        Spec = TN / Neg
+        snrROC[length] = Sens, Spec
     
     return snrROC
