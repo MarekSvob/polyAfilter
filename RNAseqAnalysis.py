@@ -1060,7 +1060,8 @@ def getSNREndROC(tROC, lenToSNRs, out_SNREndROC, bamfile, product = False):
     return snrROC
 
 
-def getSNRcovByGene(covLen, BLdata, lenToSNRs, bamfile):
+def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
+                    out_db, bamfile):
     """This function gets Sensitivity & Specificity of coverage accounted for
     by SNRs in genes (expressed transcripts) in which they occur.
     
@@ -1082,10 +1083,17 @@ def getSNRcovByGene(covLen, BLdata, lenToSNRs, bamfile):
         { SNR length : (Sensitivity, Specificity) }
     """
     
+    # If the file already exists, simply load
+    if os.path.isfile(out_snrROC):
+        snrROC = loadPKL(out_snrROC)
+        return snrROC
+    
+    # Get the list of full transcripts by strd & ref
+    BLdata = getBaselineData(out_transBaselineData, out_db, bamfile)
+    covTransByStrdRef = BLdata[0]
+    
     print('Extracting the exons up to the last {} bp of each expressed' \
           ' transcript...'.format(covLen))
-    # Get the list of full transcripts by strd & ref
-    covTransByStrdRef = BLdata[0]
     # Precalculate starts (one sorted list of tuples) for each expressed
     #  transcript based on the optimal endLen & save by strd & ref
     eachTransStartByStrdRef = collections.defaultdict(
