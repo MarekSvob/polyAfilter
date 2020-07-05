@@ -1122,8 +1122,8 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                     # Otherwise add the entire exon as is
                     else:
                         startPieces.append((eStart, eEnd))
-                # Append (not extend!) each to retain transcript identity
-                eachTransStartByStrdRef.append(startPieces)
+                # Append (not extend!) each list to retain transcript identity
+                eachTransStartByStrdRef[strd][ref].append(startPieces)
     
     # Initialize the SNRpieces found on covered exons by strd & ref - coverage
     #  of these will consitute TP & FP measurements
@@ -1159,22 +1159,21 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                         start = SNR.start - covLen if strd else SNR.end
                         end = SNR.start if strd else SNR.end + covLen
                         newSNRpieces.append((start, end))
-                # Flatten the newSNRpieces
-                newSNRpieces = flattenIntervals(newSNRpieces)
-                # Determine which portions are NEW for this strd/ref - only
-                #  those will contribute to
+                # Determine which portions of the flattened SNR pieces are NEW
+                #  for this strd/ref, as only those will contribute to
                 #  - adding new transcript starts (exons) and
                 #  - new TP/FP coverage information
                 newSNRpieces = removeOverlaps(
-                    newSNRpieces, SNRpiecesByStrdRef[strd][refName])
+                    flattenIntervals(newSNRpieces),
+                    SNRpiecesByStrdRef[strd][refName])
                 # These SNR pieces, specific for this SNR length, can overlap
                 #  either the already included (flat list) trans starts, or
                 #  some of the new ones (each list), or both (!)
                 
                 # Retain overlaps with previously added (flat list) exons:
                 #  positive selection of SNR pieces based on old transStarts
-                ovSNRpieces = getOverlaps(newSNRpieces,
-                                          flatTransStartsByStrdRef[strd][ref])
+                ovSNRpieces = getOverlaps(
+                    newSNRpieces, flatTransStartsByStrdRef[strd][refName])
                 
                 # Initialize the list of tStarts *specific* for this SNR len
                 newTstarts = []
@@ -1211,12 +1210,15 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                     # Adjust the TP & FP accordingly
                     TP += np.sum(pieceCov)
                     FP += np.count_nonzero(pieceCov == 0)
+                # Itegrate the ovSNRpieces into the aggregate dict
+                SNRpiecesByStrdRef[strd][refName] = flattenIntervals(
+                    SNRpiecesByStrdRef[strd][refName].extend(ovSNRpieces))
                     
                 # Flatten the newTstarts
                 newTstarts = flattenIntervals(newTstarts)
                 # Remove the overlaps with the previously added tStarts
                 newTstarts = removeOverlaps(
-                    newTstarts, flatTransStartsByStrdRef[strd][ref])
+                    newTstarts, flatTransStartsByStrdRef[strd][refName])
                 # Measure how much only the newTstarts, specific to this SNR
                 #  length, contribute to the total Pos/Neg
                 for tStart, tEnd in newTstarts:
@@ -1231,6 +1233,10 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                     # Adjust the Pos & Neg accordingly
                     Pos += np.sum(tCov)
                     Neg += np.count_nonzero(tCov == 0)
+                # Itegrate the newTstarts into the aggregate dict
+                flatTransStartsByStrdRef[strd][refName] = flattenIntervals(
+                    flatTransStartsByStrdRef[strd][refName].extend(newTstarts))
+                    
         # Calculate the Sens & Spec at this minimal SNR length and save
         TN = Neg - FP
         Sens = TP / Pos
