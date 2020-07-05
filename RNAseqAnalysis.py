@@ -1210,9 +1210,10 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                     # Adjust the TP & FP accordingly
                     TP += np.sum(pieceCov)
                     FP += np.count_nonzero(pieceCov == 0)
-                # Itegrate the ovSNRpieces into the aggregate dict
+                # Itegrate the ovSNRpieces into the aggregate dict & flatten
+                SNRpiecesByStrdRef[strd][refName].extend(ovSNRpieces)
                 SNRpiecesByStrdRef[strd][refName] = flattenIntervals(
-                    SNRpiecesByStrdRef[strd][refName].extend(ovSNRpieces))
+                    SNRpiecesByStrdRef[strd][refName])
                     
                 # Flatten the newTstarts
                 newTstarts = flattenIntervals(newTstarts)
@@ -1233,9 +1234,10 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                     # Adjust the Pos & Neg accordingly
                     Pos += np.sum(tCov)
                     Neg += np.count_nonzero(tCov == 0)
-                # Itegrate the newTstarts into the aggregate dict
+                # Itegrate the newTstarts into the aggregate dict & flatten
+                flatTransStartsByStrdRef[strd][refName].extend(newTstarts)
                 flatTransStartsByStrdRef[strd][refName] = flattenIntervals(
-                    flatTransStartsByStrdRef[strd][refName].extend(newTstarts))
+                    flatTransStartsByStrdRef[strd][refName])
                     
         # Calculate the Sens & Spec at this minimal SNR length and save
         TN = Neg - FP
