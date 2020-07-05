@@ -1240,9 +1240,14 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                     flatTransStartsByStrdRef[strd][refName])
                     
         # Calculate the Sens & Spec at this minimal SNR length and save
-        TN = Neg - FP
-        Sens = TP / Pos
-        Spec = TN / Neg
-        snrROC[length] = Sens, Spec
+        if Pos != 0 and Neg != 0:
+            TN = Neg - FP
+            Sens = TP / Pos
+            Spec = TN / Neg
+            if not 0 <= Sens <= 1:
+                raise Exception("Sensitivity is not in [0, 1].")
+            if not 0 <= Spec <= 1:
+                raise Exception("Specificity is not in [0, 1].")
+            snrROC[length] = Sens, Spec
     
     return snrROC
