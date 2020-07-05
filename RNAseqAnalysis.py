@@ -1122,8 +1122,8 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                     # Otherwise add the entire exon as is
                     else:
                         startPieces.append((eStart, eEnd))
-                # Append (not extend!) each list to retain transcript identity
-                eachTransStartByStrdRef[strd][ref].append(startPieces)
+                # Append (not extend!) each exon list as a tuple
+                eachTransStartByStrdRef[strd][ref].append(tuple(startPieces))
     
     # Initialize the SNRpieces found on covered exons by strd & ref - coverage
     #  of these will consitute TP & FP measurements
@@ -1175,24 +1175,30 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                 ovSNRpieces = getOverlaps(
                     newSNRpieces, flatTransStartsByStrdRef[strd][refName])
                 
-                # Initialize the list of tStarts *specific* for this SNR len
+                # Initialize the list of tStart exons specific for this SNR len
                 newTstarts = []
+                # Initialize the list of tStarts whose exons were added
+                toRemove = set()
                 # For *each* transcript start that had not been added yet:
                 #  positive selection of new transStarts and  SNR pieces based
-                #  on mutual overlap (note: tran is a list of exons)
+                #  on mutual overlap (note: tran is a tuple of exons)
                 for tran in eachTransStart:
                     # Get the overlaps with SNR pieces specific for this length
-                    SNRsInNewTransStart = getOverlaps(newSNRpieces, tran)
+                    SNRsInNewTransStart = getOverlaps(newSNRpieces, list(tran))
                     # If there are any,
                     if SNRsInNewTransStart != []:
                         # Add the overlap to the overlapped SNRpieces
                         ovSNRpieces.extend(SNRsInNewTransStart)
-                        # Add the transcript start to the tStarts aggregate
+                        # Add the transcript start exons to the tStarts aggr
                         newTstarts.extend(tran)
-                        # Remove the transcript start from the original dict to
-                        #  increase efficiency (not to try to "rediscover" it
-                        #  again in the future, since it is already added)
-                        eachTransStartByStrdRef[strd][ref].remove(tran)
+                        # Add the transcript start to the removal list
+                        toRemove |= {tran}
+                # Remove the transcript starts from the original dict to
+                #  increase efficiency (not to try to "rediscover" them again
+                #  in the future, since they are already added)
+                eachTransStartByStrdRef[strd][ref] = [
+                    tS for tS in eachTransStartByStrdRef[strd][ref]
+                    if tS not in toRemove]
                 
                 # Flatten the ovSNRpieces
                 ovSNRpieces = flattenIntervals(ovSNRpieces)
