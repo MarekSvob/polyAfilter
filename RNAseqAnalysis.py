@@ -1148,9 +1148,9 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
         print('Getting Sensitivity & Specificity for SNRs of length' \
               ' {}...'.format(length))
         # For each length, go over each strd & ref of trans starts
-        for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
-            for refName, eachTransStart in eachTransStartByRef.items():
-                # Initialize the list if SNR pieces *specific* for this SNR len
+        for strd in eachTransStartByStrdRef.keys():
+            for refName in eachTransStartByStrdRef[strd].keys():
+                # Initialize the list of SNR pieces *specific* for this SNR len
                 newSNRpieces = []
                 # Filter & extract the SNR pieces for each strd/ref
                 for SNR in lenToSNRs[length]:
@@ -1182,7 +1182,7 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                 # For *each* transcript start that had not been added yet:
                 #  positive selection of new transStarts and  SNR pieces based
                 #  on mutual overlap (note: tran is a tuple of exons)
-                for tran in eachTransStart:
+                for tran in eachTransStartByStrdRef[strd][refName]:
                     # Get the overlaps with SNR pieces specific for this length
                     SNRsInNewTransStart = getOverlaps(newSNRpieces, list(tran))
                     # If there are any,
@@ -1196,8 +1196,9 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                 # Remove the transcript starts from the original dict to
                 #  increase efficiency (not to try to "rediscover" them again
                 #  in the future, since they are already added)
-                eachTransStart = [tS for tS in eachTransStart
-                                  if tS not in toRemove]
+                eachTransStartByStrdRef[strd][refName] = tuple(
+                    tS for tS in eachTransStartByStrdRef[strd][refName]
+                    if tS not in toRemove)
                 
                 # Flatten the ovSNRpieces
                 ovSNRpieces = flattenIntervals(ovSNRpieces)
@@ -1250,9 +1251,11 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
             Sens = TP / Pos
             Spec = TN / Neg
             if not 0 <= Sens <= 1:
-                raise Exception("Sensitivity is not in [0, 1].")
+                raise Exception("Sensitivity is {}.".format(Sens))
             if not 0 <= Spec <= 1:
-                raise Exception("Specificity is not in [0, 1].")
+                raise Exception("Specificity is {}.".format(Spec))
             snrROC[length] = Sens, Spec
+    
+    savePKL(out_snrROC, snrROC)
     
     return snrROC
