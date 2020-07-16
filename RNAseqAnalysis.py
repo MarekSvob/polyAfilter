@@ -1339,7 +1339,7 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
 
 
 def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
-                   bamfile):
+                   out_transBaselineData, bamfile):
     """Function to get several statistics in order to calculate correlation
     between gene coverage & SNR content. Specifically, it goes over all genes
     and for each gene, it measures its RNA-seq coverage. If > 0, it also gets
@@ -1362,6 +1362,8 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
         Path to the saved output of this function.
     out_db : (str)
         Path to the saved GTF/GFF database.
+    out_transBaselineData : (str)
+        Path to the saved baseline data.
     bamfile : (str)
         Location of the bamfile to be scanned.
 
@@ -1381,6 +1383,14 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
     
     # Get a dictionary of SNRs by gene & length
     SNRsByGeneLen = getSNRsByGeneLen(lenToSNRs, concordant = True)
+    # Get the list of covered transcripts by strd & ref
+    BLdata = getBaselineData(out_transBaselineData, out_db, bamfile)
+    covTransByStrdRef = BLdata[0]
+    # Sort the covered transcripts by geneID
+    covTransByGene = collections.defaultdict(list)
+    for covTransByRef in covTransByStrdRef.values():
+        for covTrans in covTransByRef.values():
+            covTransByGene[covTrans.geneID].append(covTrans)
     # Initialize a dictionary for the results
     statsByGene = {}
     # Connect the gff database
@@ -1403,9 +1413,9 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
             clear_output(wait = True)
         strd = gene.strand == '+'
         refName = gene.seqid
-        # Extract all exons from this gene
-        geneExons = [(gE.start - 1, gE.end)
-                 for gE in db.children(gene, featuretype = 'exon')]
+        # Extract all exons from this gene's covered transcripts
+        geneExons = [(eS, eE) for Trans in covTransByGene[gene.id]
+                     for eS, eE in Trans.exons]
         # Flatten these exons into non-overlapping intervals
         geneExons = flattenIntervals(geneExons)
         # Measure the total exon-wise length & RNA-seq coverage of this gene
@@ -1425,12 +1435,9 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
             #  over each transcript to get its ending, then merging & removing
             # Initiate the list of endings
             transEnds = []
-            for trans in db.children(gene, featuretype = 'transcript'):
-                # Save the exons for this particular transcript
-                tExons = [(tE.start - 1, tE.end) for tE in db.children(
-                    trans, featuretype = 'exon')]
+            for Trans in covTransByGene[gene.id]:
                 # Extract the endings for this transcript and add
-                transEnds.extend(getTransEnding(tExons, covLen, strd))
+                transEnds.extend(getTransEnding(Trans.exons, covLen, strd))
             # Flatten the endings
             transEnds = flattenIntervals(transEnds)
             # Remove these endings from the gene exons
