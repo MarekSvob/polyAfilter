@@ -1386,7 +1386,7 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
     # Connect the gff database
     db = gffutils.FeatureDB(out_db, keep_order = True)
     # Count the total number of genes
-    print("Counting the number of genes in the genome...")
+    print('Counting the number of genes in the genome...')
     totalGenes = sum(1 for g in db.features_of_type(featuretype = 'gene'))
     # Load the bam file
     bam = pysam.AlignmentFile(bamfile, 'rb')
@@ -1419,26 +1419,25 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
                                               quality_threshold = 0,
                                               read_callback = lambda r:
                                                   r.is_reverse != strd))
-        # Process this gene further only if this gene is expressed
+        # Process this gene further only if it is expressed
         if eCov != 0:
             # Remove the exon-wise transcript endings for this gene by going
             #  over each transcript to get its ending, then merging & removing
-            #  overlaps
-            # Initiate the list of starts
+            # Initiate the list of endings
             transEnds = []
             for trans in db.children(gene, featuretype = 'transcript'):
                 # Save the exons for this particular transcript
                 tExons = [(tE.start - 1, tE.end) for tE in db.children(
                     trans, featuretype = 'exon')]
-                # Get the exon-wise start
+                # Extract the endings for this transcript and add
                 transEnds.extend(getTransEnding(tExons, covLen, strd))
             # Flatten the endings
             transEnds = flattenIntervals(transEnds)
             # Remove these endings from the gene exons
             geneStartsOnly = removeOverlaps(geneExons, transEnds)
-            # Get the starts coverage
-            sCov = 0
+            # Get the starts length & coverage
             sLen = 0
+            sCov = 0
             for sStart, sEnd in geneStartsOnly:
                 sLen += sEnd - sStart
                 sCov += np.sum(bam.count_coverage(contig = refName,
@@ -1448,7 +1447,8 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
                                                   read_callback = lambda r:
                                                       r.is_reverse != strd))
             # Count & get the exon-overlapping pieces for all SNRs of given
-            #  minimal length overlapping this gene
+            #  minimal length overlapping this gene; collect the data for all
+            #  exons of the gene, or for starts only
             SNRnum = 0
             SNRpieces = []
             SNRstartNum = 0
@@ -1459,13 +1459,12 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
                         start = SNR.start - covLen if strd else SNR.end
                         end = SNR.start if strd else SNR.end + covLen
                         # Count this SNR if its piece overlaps with gene exons
-                        #  (not just start pieces)
                         exonPieceOverlaps = getOverlaps([(start, end)],
                                                         geneExons)
                         if exonPieceOverlaps != []:
                             SNRpieces.extend(exonPieceOverlaps)
                             SNRnum += 1
-                        # See if this SNR's piece overlaps only with starts
+                        # See if this SNR's piece overlaps with starts only
                         startPieceOverlaps = getOverlaps([(start, end)],
                                                          geneStartsOnly)
                         if startPieceOverlaps != []:
@@ -1474,11 +1473,11 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
             # Flatten the SNRpieces
             SNRpieces = flattenIntervals(SNRpieces)
             # Calculate the total length of overlap between SNR pieces & exons
-            SNRlen = sum([pEnd - pStart for pStart, pEnd in SNRpieces])
+            SNRlen = sum(pEnd - pStart for pStart, pEnd in SNRpieces)
             # Flatten the SNR start pieces
             SNRstartPieces = flattenIntervals(SNRstartPieces)
             # Calculate the total length of overlap between SNR pieces & starts
-            SNRstartLen = sum([pEnd - pStart for pStart, pEnd in SNRstartPieces])
+            SNRstartLen = sum(pEnd - pStart for pStart, pEnd in SNRstartPieces)
             # Save the results for this gene in the following order:
             #  (exon coverage, exon length, starts coverage, SNR area, SNR #)
             statsByGene[gene.id] = (eCov, eLen, sCov, sLen, SNRlen, SNRnum,
