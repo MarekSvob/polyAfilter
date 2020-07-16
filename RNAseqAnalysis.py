@@ -1032,6 +1032,7 @@ def getSNREndROC(tROC, lenToSNRs, out_SNREndROC, bamfile, product = False):
     decreasing order exactly once. As an added benefit, the function *could*
     also coverge/terminate as soon as J statistic starts decreasing, as only
     one local maximum is assumed. (Not implemented.)
+    Note that this function hass been replaced by getSNRcovByGene().
     
     Parameters
     ----------
@@ -1385,6 +1386,7 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
     # Connect the gff database
     db = gffutils.FeatureDB(out_db, keep_order = True)
     # Count the total number of genes
+    print("Counting the number of genes in the genome...")
     totalGenes = sum(1 for g in db.features_of_type(featuretype = 'gene'))
     # Load the bam file
     bam = pysam.AlignmentFile(bamfile, 'rb')
@@ -1451,7 +1453,7 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
             SNRpieces = []
             SNRstartNum = 0
             SNRstartPieces = []
-            for length, SNRs in SNRsByGeneLen[gene.id]:
+            for length, SNRs in SNRsByGeneLen[gene.id].items():
                 if length >= minSNRlen:
                     for SNR in SNRs:
                         start = SNR.start - covLen if strd else SNR.end
