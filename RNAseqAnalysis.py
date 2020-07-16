@@ -483,13 +483,13 @@ def getNonCanCovGenes(out_NonCanCovGenes, lenToSNRs, out_db, bamfile,
     prog = 0
     # For each gene that has an SNR detected
     for geneID, glenToSNRs in geneLenToSNRs.items():
+        progressTracker += 1
         newProg = round(progressTracker / len(geneLenToSNRs), 3)
         if newProg != prog:
             prog = newProg
             print('Looking for genes with non-canonical'\
                   ' coverage... ({:.1%})'.format(prog))
             clear_output(wait = True)
-        progressTracker += 1
         # If no SNRs of sufficient length are found, skip
         if all(length < minLen for length in glenToSNRs.keys()):
             continue
@@ -715,6 +715,93 @@ def getBaselineData(out_transBaselineData, out_db, bamfile):
     return covTransByStrdRef, covExonsByStrdRef, Pos, Neg
     
 
+def getTransEnding(exons, endLength, strd):
+    """Helper function to extract the exon-wise end pieces of a transcript,
+    consisting of a list of exons, of a given total length.
+
+    Parameters
+    ----------
+    exons : (list)
+        The complete list of exons constituting a transcript: [ (start, end) ]
+    endLength : (int)
+        The total length of the exon-wise ending.
+    strd : (bool)
+        The strand on which the transcript is found.
+        
+    Returns
+    -------
+    transEndPieces : (list)
+        [ (start, end) ]
+    """
+    
+    # Initiate the flattened exon-wise end pieces for this transcript
+    transEndPieces = []
+    # Initiate how much is left to progress from the end
+    remaining = int(endLength)
+    # For each exon (ordered last-to-first wrt/ strand)
+    for eStart, eEnd in sorted(exons, reverse = strd):
+        # Get the exon length
+        exLen = eEnd - eStart
+        # If it is not longer than the remainder, add the entire exon &
+        #  decrease the remainder
+        if exLen < remaining:
+            transEndPieces.append((eStart, eEnd))
+            remaining -= exLen
+        # Otherwise add only the remaining piece of the exon & stop
+        else:
+            transEndPieces.append((eEnd - remaining, eEnd) if strd
+                                  else (eStart, eStart + remaining))
+            break
+    
+    return transEndPieces
+
+
+def getTransStart(exons, endLength, strd):
+    """Helper function to extract the exon-wise start pieces of a transcript,
+    consisting of a list of exons, excluding an ending of a given total length.
+    Note that this function could also be achieved by the combination of 
+    getTransEnding() and then removeOverlaps() between the complete list of
+    exons and transEndPieces, but this custom function should be a bit faster.
+    
+    Parameters
+    ----------
+    exons : (list)
+        The complete list of exons constituting a transcript: [ (start, end) ]
+    endLength : (int)
+        The total length of the exon-wise ending to be escaped before starts
+        are retained.
+    strd : (bool)
+        The strand on which the transcript is found.
+        
+    Returns
+    -------
+    transStartPieces : (list)
+        [ (start, end) ]
+    """
+    
+    # Initialize the list of start pieces
+    transStartPieces = []
+    # Initiate how much is left to progress to escape the end
+    remaining = int(endLength)
+    # For each exon (ordered last-to-first wrt/ strand)
+    for eStart, eEnd in sorted(exons, reverse = strd):
+        # If end has not been escaped yet
+        if remaining > 0:
+            # Measure the size of the exon
+            exLen = eEnd - eStart
+            # If longer than the remainder, add the escaped part of the exon
+            if exLen > remaining:
+                transStartPieces.append((eStart, eEnd - remaining) if strd
+                                        else (eStart + remaining, eEnd))
+            # Either way, decrease the remainder by the exon length
+            remaining -= exLen
+        # Otherwise add the entire exon as is
+        else:
+            transStartPieces.append((eStart, eEnd))
+    
+    return transStartPieces
+    
+    
 def getTransEndSensSpec(endLength, bamfile, BLdata):
     """Function to provide data for a ROC curve for various transcript end
     lengths.
@@ -789,25 +876,11 @@ def getTransEndSensSpec(endLength, bamfile, BLdata):
             #  this reference
             transEndPieces = []
             # Iterate through previously found transcripts to extract &
-            #  save flattened exon-wise endpieces of given length for each
+            #  save exon-wise endpieces of given length for each
             for Tran in trans:
-                # Initiate how much is left to progress from the end
-                remaining = int(endLength)
-                # For each exon (ordered last-to-first wrt/ strand)
-                for eStart, eEnd in sorted(Tran.exons, reverse = strd):
-                    exLen = eEnd - eStart
-                    # If it is not longer than the remainder, add the entire
-                    #  exon & decrease the remainder
-                    if exLen < remaining:
-                        transEndPieces.append((eStart, eEnd))
-                        remaining -= exLen
-                    # Otherwise add only the remaining piece of the exon
-                    else:
-                        transEndPieces.append(
-                            (eEnd - remaining, eEnd) if strd
-                            else (eStart, eStart + remaining))
-                        break
-            
+                transEndPieces.extend(getTransEnding(Tran.exons,
+                                                     endLength,
+                                                     strd))            
             # Flatten the transEndPieces
             transEndPieces = flattenIntervals(transEndPieces)
             # For each reference (on each strand), extract and add the exon
@@ -840,7 +913,7 @@ def getTransEndSensSpec(endLength, bamfile, BLdata):
 
 def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
                    endLenMin, endLenMax, tROC = {}, product = False):
-    """Gradient descent-like wrapper funciton around getTransEndSensSpec() to
+    """A gradient descent-like wrapper funciton around getTransEndSensSpec() to
     manage result generation & collection. This function maximizes Youden's J
     statistic (Sensitivity + Specificity - 1) across exon-wise transcript
     endLengths. This function assumes that there is only one such local
@@ -950,7 +1023,8 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
 
 
 def getSNREndROC(tROC, lenToSNRs, out_SNREndROC, bamfile, product = False):
-    """This alhorithm simply goes over ALL SNR lengths exactly once. This is
+    """This alhorithm goes over ALL SNR lengths exactly once to determine the
+    sensitivity and specificity of coverage captured by the SNR pieces. This is
     different from the transcript end algorithm, where there are many more
     possibilities and info on one end length is relatively independent of the
     others. In case of SNR lengths, we are interested in aggregating info about
@@ -1063,7 +1137,8 @@ def getSNREndROC(tROC, lenToSNRs, out_SNREndROC, bamfile, product = False):
 def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                     out_db, bamfile):
     """This function gets Sensitivity & Specificity of coverage accounted for
-    by SNRs in genes (expressed transcripts) in which they occur.
+    by SNRs (in exons only, but NOT exon-wise) in genes (expressed transcripts)
+    in which they occur.
     
     Parameters
     ----------
@@ -1256,6 +1331,157 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                 raise Exception("Specificity is {}.".format(Spec))
             snrROC[length] = Sens, Spec
     
+    bam.close()
     savePKL(out_snrROC, snrROC)
     
     return snrROC
+
+
+def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
+                   bamfile):
+    """Function to get several statistics in order to calculate correlation
+    between gene coverage & SNR content. Specifically, it goes over all genes
+    and for each gene, it measures its RNA-seq coverage. If > 0, it also gets
+    gene length, starts coverage, # of SNRs (of given minimal length) and the
+    associated total potential coverage area (that upstream of these SNRs
+    overlapping exons). This data can be used to plot total coverage / starts
+    coverage vs. # of SNRs / SNR area for each gene, normalized by gene length,
+    if needed.
+
+    Parameters
+    ----------    
+    covLen : (int)
+        The optimal length of coverage with respect to the potential priming
+        location.
+    minSNRlen : (int)
+        Minimal length of SNRs to be included.
+    lenToSNRs : (dict)
+        { SNR length : [ SNR ] }
+    out_geneStats : (str)
+        Path to the saved output of this function.
+    out_db : (str)
+        Path to the saved GTF/GFF database.
+    bamfile : (str)
+        Location of the bamfile to be scanned.
+
+    Returns
+    -------
+    statsByGene : (dict)
+        { gene : (exon coverage, exon length,
+                  starts coverage, starts length,
+                  SNR exon area, SNR exon number,
+                  SNR start area, SNR start number) }
+    """
+    
+    # If the file already exists, simply load
+    if os.path.isfile(out_geneStats):
+        statsByGene = loadPKL(out_geneStats)
+        return statsByGene
+    
+    # Get a dictionary of SNRs by gene & length
+    SNRsByGeneLen = getSNRsByGeneLen(lenToSNRs, concordant = True)
+    # Initialize a dictionary for the results
+    statsByGene = {}
+    # Connect the gff database
+    db = gffutils.FeatureDB(out_db, keep_order = True)
+    # Count the total number of genes
+    totalGenes = sum(1 for g in db.features_of_type(featuretype = 'gene'))
+    # Load the bam file
+    bam = pysam.AlignmentFile(bamfile, 'rb')
+    # Initialize the progress tracker variables
+    progressTracker = 0
+    prog = 0
+    # Go over all genes
+    for gene in db.features_of_type(featuretype = 'gene'):
+        progressTracker += 1
+        newProg = round(progressTracker / totalGenes, 3)
+        if newProg != prog:
+            prog = newProg
+            print('Getting gene coverage statistics... ({:.1%})'.format(prog))
+            clear_output(wait = True)
+        strd = gene.strand == '+'
+        refName = gene.seqid
+        # Extract all exons from this gene
+        geneExons = [(gE.start - 1, gE.end)
+                 for gE in db.children(gene, featuretype = 'exon')]
+        # Flatten these exons into non-overlapping intervals
+        geneExons = flattenIntervals(geneExons)
+        # Measure the total exon-wise length & RNA-seq coverage of this gene
+        eLen = 0
+        eCov = 0
+        for eStart, eEnd in geneExons:
+            eLen += eEnd - eStart
+            eCov += np.sum(bam.count_coverage(contig = refName,
+                                              start = eStart,
+                                              stop = eEnd,
+                                              quality_threshold = 0,
+                                              read_callback = lambda r:
+                                                  r.is_reverse != strd))
+        # Process this gene further only if this gene is expressed
+        if eCov != 0:
+            # Remove the exon-wise transcript endings for this gene by going
+            #  over each transcript to get its ending, then merging & removing
+            #  overlaps
+            # Initiate the list of starts
+            transEnds = []
+            for trans in db.children(gene, featuretype = 'transcript'):
+                # Save the exons for this particular transcript
+                tExons = [(tE.start - 1, tE.end) for tE in db.children(
+                    trans, featuretype = 'exon')]
+                # Get the exon-wise start
+                transEnds.extend(getTransEnding(tExons, covLen, strd))
+            # Flatten the endings
+            transEnds = flattenIntervals(transEnds)
+            # Remove these endings from the gene exons
+            geneStartsOnly = removeOverlaps(geneExons, transEnds)
+            # Get the starts coverage
+            sCov = 0
+            sLen = 0
+            for sStart, sEnd in geneStartsOnly:
+                sLen += sEnd - sStart
+                sCov += np.sum(bam.count_coverage(contig = refName,
+                                                  start = sStart,
+                                                  stop = sEnd,
+                                                  quality_threshold = 0,
+                                                  read_callback = lambda r:
+                                                      r.is_reverse != strd))
+            # Count & get the exon-overlapping pieces for all SNRs of given
+            #  minimal length overlapping this gene
+            SNRnum = 0
+            SNRpieces = []
+            SNRstartNum = 0
+            SNRstartPieces = []
+            for length, SNRs in SNRsByGeneLen[gene.id]:
+                if length >= minSNRlen:
+                    for SNR in SNRs:
+                        start = SNR.start - covLen if strd else SNR.end
+                        end = SNR.start if strd else SNR.end + covLen
+                        # Count this SNR if its piece overlaps with gene exons
+                        #  (not just start pieces)
+                        exonPieceOverlaps = getOverlaps([(start, end)],
+                                                        geneExons)
+                        if exonPieceOverlaps != []:
+                            SNRpieces.extend(exonPieceOverlaps)
+                            SNRnum += 1
+                        # See if this SNR's piece overlaps only with starts
+                        startPieceOverlaps = getOverlaps([(start, end)],
+                                                         geneStartsOnly)
+                        if startPieceOverlaps != []:
+                            SNRstartPieces.extend(startPieceOverlaps)
+                            SNRstartNum += 1
+            # Flatten the SNRpieces
+            SNRpieces = flattenIntervals(SNRpieces)
+            # Calculate the total length of overlap between SNR pieces & exons
+            SNRlen = sum([pEnd - pStart for pStart, pEnd in SNRpieces])
+            # Flatten the SNR start pieces
+            SNRstartPieces = flattenIntervals(SNRstartPieces)
+            # Calculate the total length of overlap between SNR pieces & starts
+            SNRstartLen = sum([pEnd - pStart for pStart, pEnd in SNRstartPieces])
+            # Save the results for this gene in the following order:
+            #  (exon coverage, exon length, starts coverage, SNR area, SNR #)
+            statsByGene[gene.id] = (eCov, eLen, sCov, sLen, SNRlen, SNRnum,
+                                    SNRstartLen, SNRstartNum)
+    bam.close()
+    savePKL(out_geneStats, statsByGene)
+    
+    return statsByGene
