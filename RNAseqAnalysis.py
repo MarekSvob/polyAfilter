@@ -1390,7 +1390,8 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
     covTransByGene = collections.defaultdict(list)
     for covTransByRef in covTransByStrdRef.values():
         for covTrans in covTransByRef.values():
-            covTransByGene[covTrans.geneID].append(covTrans)
+            for covTran in covTrans:
+                covTransByGene[covTran.geneID].append(covTran)
     # Initialize a dictionary for the results
     statsByGene = {}
     # Connect the gff database
