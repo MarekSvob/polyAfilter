@@ -53,8 +53,8 @@ class Transcript:
 
 def filterReads(filt_bamfile, out_db, out_strandedFeats, bamfile,
                 featType = 'exon', concordant = True):
-    """Function to create a bam file from a subset of reads that are aligned
-    to a specific feature type on the same or opposite strand.
+    """Function to create and index a bam file from a subset of reads that are
+    aligned to a specific feature type on the same or opposite strand.
 
     Parameters
     ----------
@@ -79,10 +79,10 @@ def filterReads(filt_bamfile, out_db, out_strandedFeats, bamfile,
     
     # If the file already exists, announce and do not do anything
     if os.path.isfile(filt_bamfile):
-        print('The filtered file already exists.')
+        print('The filtered bam file already exists.')
         if not os.path.isfile('{}.bai'.format(filt_bamfile)):
-            print('!!! Before continuing, index it in terminal using command '\
-                  '"samtools index {}"'.format(filt_bamfile))
+            pysam.index(filt_bamfile)
+            print('The bam file has been indexed.')
         return    
     
     # This will usually just load the file
@@ -125,10 +125,9 @@ def filterReads(filt_bamfile, out_db, out_strandedFeats, bamfile,
     filt_bam.close()
     bam.close()
     
-    print('A filtered bam file has been created.')
-    print('!!! Before continuing, index it in terminal using command '\
-          '"samtools index {}"'.format(filt_bamfile))
-
+    pysam.index(filt_bamfile)
+    print('A filtered bam file has been created and indexed.')
+    
 
 def getExpectedCoverage(out_db, out_strandedFeats, bamfile, concordant = True,
                         baselineFeat = 'transcript'):
@@ -1397,8 +1396,7 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
     # Connect the gff database
     db = gffutils.FeatureDB(out_db, keep_order = True)
     # Count the total number of genes
-    print('Counting the number of genes in the genome...')
-    totalGenes = sum(1 for g in db.features_of_type(featuretype = 'gene'))
+    totalGenes = len(covTransByGene)
     # Load the bam file
     bam = pysam.AlignmentFile(bamfile, 'rb')
     # Initialize the progress tracker variables
@@ -1406,6 +1404,8 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
     prog = 0
     # Go over all genes
     for gene in db.features_of_type(featuretype = 'gene'):
+        geneID = gene.id
+        if geneID not in covTransByGene: continue
         progressTracker += 1
         newProg = round(progressTracker / totalGenes, 3)
         if newProg != prog:
@@ -1415,7 +1415,7 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
         strd = gene.strand == '+'
         refName = gene.seqid
         # Extract all exons from this gene's covered transcripts
-        geneExons = [(eS, eE) for Trans in covTransByGene[gene.id]
+        geneExons = [(eS, eE) for Trans in covTransByGene[geneID]
                      for eS, eE in Trans.exons]
         # Flatten these exons into non-overlapping intervals
         geneExons = flattenIntervals(geneExons)
@@ -1436,7 +1436,7 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
             #  over each transcript to get its ending, then merging & removing
             # Initiate the list of endings
             transEnds = []
-            for Trans in covTransByGene[gene.id]:
+            for Trans in covTransByGene[geneID]:
                 # Extract the endings for this transcript and add
                 transEnds.extend(getTransEnding(Trans.exons, covLen, strd))
             # Flatten the endings
@@ -1461,7 +1461,7 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
             SNRpieces = []
             SNRstartNum = 0
             SNRstartPieces = []
-            for length, SNRs in SNRsByGeneLen[gene.id].items():
+            for length, SNRs in SNRsByGeneLen[geneID].items():
                 if length >= minSNRlen:
                     for SNR in SNRs:
                         start = SNR.start - covLen if strd else SNR.end
@@ -1488,7 +1488,7 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
             SNRstartLen = sum(pEnd - pStart for pStart, pEnd in SNRstartPieces)
             # Save the results for this gene in the following order:
             #  (exon coverage, exon length, starts coverage, SNR area, SNR #)
-            statsByGene[gene.id] = (eCov, eLen, sCov, sLen, SNRlen, SNRnum,
+            statsByGene[geneID] = (eCov, eLen, sCov, sLen, SNRlen, SNRnum,
                                     SNRstartLen, SNRstartNum)
     bam.close()
     savePKL(out_geneStats, statsByGene)
