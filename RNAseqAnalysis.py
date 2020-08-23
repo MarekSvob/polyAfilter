@@ -86,7 +86,8 @@ def filterReads(filt_bamfile, out_db, out_strandedFeats, bamfile,
         return    
     
     # This will usually just load the file
-    flatFeats = getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db,
+    flatFeats = getFlatFeatsByTypeStrdRef(out_strandedFeats,
+                                          out_db,
                                           (featType, ))
     
     # Connect to the bam file
@@ -106,7 +107,7 @@ def filterReads(filt_bamfile, out_db, out_strandedFeats, bamfile,
                 '+' if strd else '-', ref))
             for start, end in feats:
                 for read in bam.fetch(contig = ref, start = start, end = end):
-                    # Make sure the read is on the correct strand before adding:
+                    # Make sure the read is on the correct strand before adding
                     if concordant == (read.is_reverse != strd):
                         filt_reads.add(read)
     
@@ -525,8 +526,8 @@ def getNonCanCovGenes(out_NonCanCovGenes, lenToSNRs, out_db, bamfile,
             trans0end = trans.end               # Conversion to 0-based
             [geneID] = trans.attributes['gene_id']
             # Save all transcripts (lite) on the same strand as the gene
-            transcripts.append(Transcript(geneID, trans.seqid, trans0start,
-                                          trans0end, exons))
+            transcripts.append(Transcript(geneID, trans0start, trans0end,
+                                          exons))
             # Determine the transcripts's exon-wise end
             remaining = lastBP
             covStart = None
