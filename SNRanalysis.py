@@ -331,7 +331,9 @@ def flattenIntervals(intervals):
         # If the new interval overlaps the existing, merge by updating the end.
         # Note that when iStart = currentEnd, this is technically an adjacency
         #  (not overlap) but even then a merge is desirable, nevertheless.
-        if currentStart <= iStart <= currentEnd:
+        # Also note that because the intervals have been sorted,
+        #  currentStart > iStart can never be the case
+        if iStart <= currentEnd:
             currentEnd = max(iEnd, currentEnd)
         # Otherwise add the previous (no longer overlapped) merged interval
         #  into the list and create a new 'current' interval.
@@ -339,6 +341,8 @@ def flattenIntervals(intervals):
             flat.append((currentStart, currentEnd))
             currentStart = iStart
             currentEnd = iEnd
+    # Don't forget to add the last interval!
+    flat.append((currentStart, currentEnd))
         
     return flat
 

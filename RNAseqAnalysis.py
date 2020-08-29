@@ -481,10 +481,11 @@ def getNonCanCovGenes(out_NonCanCovGenes, lenToSNRs, out_db, bamfile,
     bam = pysam.AlignmentFile(bamfile, 'rb')
     progressTracker = 0
     prog = 0
+    nGenes = len(geneLenToSNRs)
     # For each gene that has an SNR detected
     for geneID, glenToSNRs in geneLenToSNRs.items():
         progressTracker += 1
-        newProg = round(progressTracker / len(geneLenToSNRs), 3)
+        newProg = round(progressTracker / nGenes, 3)
         if newProg != prog:
             prog = newProg
             print('Looking for genes with non-canonical'\
@@ -513,10 +514,10 @@ def getNonCanCovGenes(out_NonCanCovGenes, lenToSNRs, out_db, bamfile,
         Tendings = []
         strd = geneFeat.strand == '+'
         # Go over ALL transcripts overlapping this gene (even from other genes)
-        #  add up the coverage of exon-wise last X bp
+        #  on the same strand and add up the coverage of exon-wise last X bp
         for trans in db.features_of_type(
                 featuretype = 'transcript',
-                limit = (geneFeat.seqid, gene0start, gene0end),
+                limit = (geneFeat.seqid, geneFeat.start, geneFeat.end), # 1-b
                 strand = geneFeat.strand):
             # Extract the exons as (start, end); 1- => 0-based
             exons = sorted([(e.start - 1, e.end) for e
@@ -524,13 +525,12 @@ def getNonCanCovGenes(out_NonCanCovGenes, lenToSNRs, out_db, bamfile,
                            reverse = strd) # Order from last to 1st wrt/ strand
             trans0start = trans.start - 1       # Conversion to 0-based
             trans0end = trans.end               # Conversion to 0-based
-            [geneID] = trans.attributes['gene_id']
+            [t_geneID] = trans.attributes['gene_id']
             # Save all transcripts (lite) on the same strand as the gene
-            transcripts.append(Transcript(geneID, trans0start, trans0end,
+            transcripts.append(Transcript(t_geneID, trans0start, trans0end,
                                           exons))
-            # Determine the transcripts's exon-wise end
+            # Determine the transcript's exon-wise end
             remaining = lastBP
-            covStart = None
             # Go over exons from last to first wrt/ the strand
             for exon in exons:
                 exLen = exon[1] - exon[0]
@@ -544,7 +544,7 @@ def getNonCanCovGenes(out_NonCanCovGenes, lenToSNRs, out_db, bamfile,
             else:
                 covStart = trans0start if strd else trans0end
             # Only add the ending if the transcripts's exon-wise end is not
-            #  beyond the gene end (in case it is from another gene)
+            #  entirely beyond the gene end (in case it is from another gene)
             if strd and covStart < gene0end:
                 newEnding = (max(covStart, gene0start),
                              min(trans0end, gene0end))
