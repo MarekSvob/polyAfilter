@@ -343,6 +343,9 @@ def flattenIntervals(intervals):
             currentEnd = iEnd
     # Don't forget to add the last interval!
     flat.append((currentStart, currentEnd))
+    
+    # Check that the intervals in each list are indeed not overlapping
+    nonOverlapCheck(flat)
         
     return flat
 
@@ -368,6 +371,9 @@ def getOverlaps(aIntervals, bIntervals):
     # Sort the two lists to be in the ascending order
     aIntervals.sort(key = lambda interval: interval[0])
     bIntervals.sort(key = lambda interval: interval[0])
+    # Check that the sorted intervals in each list are indeed not overlapping
+    for intervals in (aIntervals, bIntervals):
+        nonOverlapCheck(intervals)
     # Initialize the output and bInt index, and extract the first bInt info
     overlaps = []
     # If bIntervals is empty, return
@@ -430,9 +436,9 @@ def getOverlaps(aIntervals, bIntervals):
 
 def removeOverlaps(aIntervals, bIntervals):
     """Helper function to remove the mutual overlaps of two lists of intervals
-    from ane of them (aIntervals) in linear time. This function uses the same
-    general logic as getOverlaps(). Note that this function assumes flattened
-    (internally non-overlapping) 0-based intervals.
+    from the first one of them (aIntervals) in linear time. This function uses
+    similar general logic as getOverlaps(). Note that this function assumes
+    two lists of flattened (internally non-overlapping) 0-based intervals.
     
     Parameters
     ----------
@@ -450,47 +456,46 @@ def removeOverlaps(aIntervals, bIntervals):
     # Sort the two lists to be in the ascending order
     aIntervals.sort(key = lambda interval: interval[0])
     bIntervals.sort(key = lambda interval: interval[0])
-    # If bIntervals is empty, return aIntervals as is, sorted
-    if bIntervals == []:
-        return aIntervals
-    # Initialize the output and bInt index, and extract the first bInt info
+    # Check that the sorted intervals in each list are indeed not overlapping
+    for intervals in (aIntervals, bIntervals):
+        nonOverlapCheck(intervals)
+    # Initialize the output, bInt index, and max bInt index
     nonOverlaps = []
     bI = 0
-    bStart, bEnd = bIntervals[bI]
-    # Once bI reaches lenOfB, return nonOverlaps
-    lenOfB = len(bIntervals)
-    # Test each possible pair of bIntervals & bIntervals in linear time
+    maxbI = len(bIntervals)
+    # Test each possible pair of aIntervals & bIntervals in linear time
     for aStart, aEnd in aIntervals:
         # Initialize the non-overlap start of the aInterval to be modified
         # Note: when the end of the aInterval is modified, it is added right
         #  away and next aInterval is evaluated without changing the bInterval
         noStart = aStart
-        # For this given aInt, keep going over the bIntervals as long as they
-        #  do not occur after the aInt, including when bStart = aEnd (adjacent)
-        #  Once the bInterval occurs after the aInt, add the non-overlapped
-        #  portion and go to next aInt
-        while bStart < aEnd and bI <= lenOfB:
+        # Once bI reaches maxbI, overlaps are no longer possible and remainder
+        #  of all aIntervals are added (this also means that when bIntervals is
+        #  an empty list, all aIntervals are returned as is)
+        while bI in range(maxbI):
+            # Initialize the overlapping piece start & end
+            bStart, bEnd = bIntervals[bI]
+            # For this given aInt, keep going over the bIntervals as long as
+            #  they do not occur after the aInt, (including when bStart = aEnd
+            #  (adjacent)). Once the bInterval occurs after the aInt, add the
+            #  non-overlapped portion of aInt and go to next w/o increasing bI
+            if bStart >= aEnd:
+                nonOverlaps.append((noStart, aEnd))
+                break
             # If the bInterval is entirely before the aInt, go to the next one
             #  without modifying; when bEnd = noStart, they are only adjacent
-            if bEnd <= noStart:
+            elif bEnd <= noStart:
                 bI += 1
-                if bI < lenOfB:
-                    bStart, bEnd = bIntervals[bI]
-                else:
-                    return nonOverlaps
-            # Othewise see which of the following overlaps is found & modify
+            # Otherwise see which of the following overlaps is found & modify
             # If the bInterval start is before the aInt
             elif bStart <= noStart:
                 # If the bEnd is inside the aInt, remove up to bEnd and move on
+                #  to the next bInt
                 if bEnd < aEnd:
                     noStart = bEnd
                     bI += 1
-                    if bI < lenOfB:
-                        bStart, bEnd = bIntervals[bI]
-                    else:
-                        return nonOverlaps
                 # Otherwise the bInterval must overhang the entire aInt, so
-                #  skip adding the aInt entirely, without moving onto the next
+                #  skip adding the rest of aInt, without moving onto the next
                 #  bInterval, as the next aInt may be overlapped by this bInt
                 else:
                     break
@@ -500,10 +505,6 @@ def removeOverlaps(aIntervals, bIntervals):
                 nonOverlaps.append((noStart, bStart))
                 noStart = bEnd
                 bI += 1
-                if bI < lenOfB:
-                    bStart, bEnd = bIntervals[bI]
-                else:
-                    return nonOverlaps
             # The only option left is that the bEnd is outside, while the
             #  bStart is inside, so add the aInt up to the bStart BUT again,
             #  do not move onto the following bInterval just yet!
@@ -516,6 +517,29 @@ def removeOverlaps(aIntervals, bIntervals):
             nonOverlaps.append((noStart, aEnd))
             
     return nonOverlaps
+
+
+def nonOverlapCheck(intervals):
+    """For a given sorted list of intervals, check that they are not
+    overlapping.
+    
+    Parameters
+    ----------
+    intervals : (list)
+        [ (start, end) ]
+
+    Returns
+    -------
+    None.
+    """
+    oldEnd = 0
+    for newStart, newEnd in intervals:
+        if newStart < oldEnd:
+            raise Exception('The intervals overlap!')
+        # Note that if newStart == oldEnd, they are adjacent
+        else:
+            oldEnd = newEnd
+        
 
 
 def getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db, featsOfInterest):
@@ -670,8 +694,7 @@ def getSNRsByGeneLen(lenToSNRs, concordant = True):
     
     # Initialize a nested defaultdict
     geneLenToSNRs = collections.defaultdict(
-        lambda: collections.defaultdict(list)
-        )
+        lambda: collections.defaultdict(list))
     
     # Go over all SNRs and sort them by concordant or discordant genes
     for length, SNRs in lenToSNRs.items():

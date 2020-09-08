@@ -440,7 +440,8 @@ def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
 def getNonCanCovGenes(out_NonCanCovGenes, lenToSNRs, out_db, bamfile,
                       lastBP = 250, covThreshold = 0.05, minLen = 0):
     """Function to scan each gene with SNRs and determine what proportion of
-    its non-canonical RNA-seq coverage may be accounted for by SNRs.
+    its non-canonical RNA-seq coverage (exon-wise ends) may be accounted for
+    by SNRs.
 
     Parameters
     ----------
@@ -611,10 +612,11 @@ def getNonCanCovGenes(out_NonCanCovGenes, lenToSNRs, out_db, bamfile,
     return nonCanCovGenes
 
 
-def getBaselineData(out_transBaselineData, out_db, bamfile):
-    """Function to obtain the baseline reference data (Transcripts & exons) as
-    an input for calculation of sensitivity, specificity, and accuracy. Note
-    that here, only expressed (i.e., with coverage) transcripts are considered.
+def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons):
+    """Function to obtain the baseline reference data (Transcripts, exons, and
+    total TP/TN) as an input for laster calculations of sensitivity &
+    specificity at each given end length. Note that here, only expressed (i.e.,
+    with any coverage) transcripts are considered.
     
     Parameters
     ----------
@@ -624,14 +626,15 @@ def getBaselineData(out_transBaselineData, out_db, bamfile):
         Path to the saved GTF/GFF database.
     bamfile : (str)
         Path to the (filtered) bam file.
-
+    includeIntrons : (bool)
+        Whether (positive or negative) coverage of introns should also be
+        considered.
+    
     Returns
     -------
     covTransByStrdRef : (dict)
         { strd : { ref : [ Transcript ] } } of transcripts with non-0 exonic
         coverage.
-    covExonsByStrdRef : (dict)
-        { strd : { ref : [ exon ] } } flattened from transcripts above.
     Pos : (int)
         Total coverage across all flattened exons from covered transcripts.
     Neg : (int)
@@ -640,19 +643,16 @@ def getBaselineData(out_transBaselineData, out_db, bamfile):
     
     # If the file already exists, simply load
     if os.path.isfile(out_transBaselineData):
-        covTransByStrdRef, covExonsByStrdRef, Pos, Neg = loadPKL(
+        covTransByStrdRef, Pos, Neg = loadPKL(
             out_transBaselineData)
-        return covTransByStrdRef, covExonsByStrdRef, Pos, Neg
+        return covTransByStrdRef, Pos, Neg
     
     # Otherwise initialize the variables    
-    print('Getting baseline data for ROC across '\
-          'exon-wise covered transcripts...')
+    print('Getting baseline data for ROC across exon-wise covered' \
+          'transcripts, {} introns...'.format('including' if includeIntrons
+                                              else 'excluding'))
     covTransByStrdRef = collections.defaultdict(
-        lambda: collections.defaultdict(list)
-        )
-    covExonsByStrdRef = collections.defaultdict(
-        lambda: collections.defaultdict(list)
-        )
+        lambda: collections.defaultdict(list))
     Pos = 0
     Neg = 0
     
@@ -664,41 +664,64 @@ def getBaselineData(out_transBaselineData, out_db, bamfile):
     # Get all exon-covered transcripts and their flattened exons by strd & ref
     for strd in (True, False):
         for refname in references:
-            # Process this transcript only if it has ANY exonic coverage
+            # Initiate the to-be-flattened list of exons/transcripts for this
+            #  strd/reference
+            covPieces = []
+            # Process this transcript only if it has ANY (exonic) coverage
             for trans in db.features_of_type(
                     featuretype = 'transcript',
                     limit = (refname, 1, bam.get_reference_length(refname)),
                     strand = '+' if strd else '-'):
+                # Initiate the coverage measurement for this transcript
+                tCov = 0
+                # If introns are to be considered as well, check coverage
+                #  before extracting exons
+                if includeIntrons:
+                    trans0start = trans.start - 1       # Conversion to 0-based
+                    trans0end = trans.end               # Conversion to 0-based
+                    tCov += np.sum(
+                        bam.count_coverage(contig = refname,
+                                           start = trans0start,
+                                           stop = trans0end,
+                                           quality_threshold = 0,
+                                           read_callback = lambda r:
+                                               r.is_reverse != strd))
+                    # Only transcripts with ANY coverage are considered
+                    if tCov == 0:
+                        continue
+                    # Add this covered transcript in the ref-wide piece list
+                    covPieces.append((trans0start, trans0end))
                 # Extract exons from the transcript, last-to-first
                 exons = sorted([(e.start - 1, e.end) for e
                                 in db.children(trans, featuretype = 'exon')],
                                reverse = strd)
-                eCov = 0
-                for start, end in exons:
-                        eCov += np.sum(
-                            bam.count_coverage(contig = refname,
-                                               start = start,
-                                               stop = end,
-                                               quality_threshold = 0,
-                                               read_callback = lambda r:
-                                                   r.is_reverse != strd))
-                # Only transcripts with ANY exonic coverage are considered here
-                if eCov == 0:
-                    continue
-                trans0start = trans.start - 1       # Conversion to 0-based
-                trans0end = trans.end               # Conversion to 0-based
+                # If only exons are to be considered, check coverage now
+                if not includeIntrons:
+                    for start, end in exons:
+                            tCov += np.sum(
+                                bam.count_coverage(contig = refname,
+                                                   start = start,
+                                                   stop = end,
+                                                   quality_threshold = 0,
+                                                   read_callback = lambda r:
+                                                       r.is_reverse != strd))
+                    # Only transcripts with ANY exonic coverage are considered
+                    if tCov == 0:
+                        continue
+                    trans0start = trans.start - 1       # Conversion to 0-based
+                    trans0end = trans.end               # Conversion to 0-based
+                    # Add exons of this exon-wise covered transcript to the
+                    #  ref-wide piece list
+                    covPieces.extend(exons)
                 [geneID] = trans.attributes['gene_id']
                 # Save this transcript to the list of covered transcripts
                 covTransByStrdRef[strd][refname].append(
                     Transcript(geneID, trans0start, trans0end, exons))
-                # Add these exons in the ref-wide exon list
-                covExonsByStrdRef[strd][refname].extend(exons)
-            # Once complete for this strd/ref, flatten the ref-wide exon list
-            covExonsByStrdRef[strd][refname] = flattenIntervals(
-                covExonsByStrdRef[strd][refname])
-            # Get the non/coverage of these exons to speed up future processing
-            for start, end in covExonsByStrdRef[strd][refname]:
-                exonicCov = np.sum(
+            # Once complete for this strd/ref, flatten the ref-wide exons/trans
+            #  pieces & get the non/coverage basline data
+            covPieces = flattenIntervals(covPieces)
+            for start, end in covPieces:
+                pieceCov = np.sum(
                     bam.count_coverage(contig = refname,
                                        start = start,
                                        stop = end,
@@ -706,18 +729,17 @@ def getBaselineData(out_transBaselineData, out_db, bamfile):
                                        read_callback = lambda r:
                                            r.is_reverse != strd),
                     axis = 0)
-                Pos += np.sum(exonicCov)
-                Neg += np.count_nonzero(exonicCov == 0)
+                Pos += np.sum(pieceCov)
+                Neg += np.count_nonzero(pieceCov == 0)
     
-    savePKL(out_transBaselineData,
-            (covTransByStrdRef, covExonsByStrdRef, Pos, Neg))
+    savePKL(out_transBaselineData, (covTransByStrdRef, Pos, Neg))
     
-    return covTransByStrdRef, covExonsByStrdRef, Pos, Neg
+    return covTransByStrdRef, Pos, Neg
     
 
 def getTransEnding(exons, endLength, strd):
     """Helper function to extract the exon-wise end pieces of a transcript,
-    consisting of a list of exons, of a given total length.
+    consisting of a list of exons, of a given total cumulative length.
 
     Parameters
     ----------
@@ -756,12 +778,9 @@ def getTransEnding(exons, endLength, strd):
     return transEndPieces
 
 
-def getTransStart(exons, endLength, strd):
-    """Helper function to extract the exon-wise start pieces of a transcript,
-    consisting of a list of exons, excluding an ending of a given total length.
-    Note that this function could also be achieved by the combination of 
-    getTransEnding() and then removeOverlaps() between the complete list of
-    exons and transEndPieces, but this custom function should be a bit faster.
+def getTransStartEnding(exons, endLength, strd):
+    """Helper function to split a transcript represented by a list of exons
+    into an exon-wise start and ending of a given cumulative ending length.
     
     Parameters
     ----------
@@ -777,10 +796,13 @@ def getTransStart(exons, endLength, strd):
     -------
     transStartPieces : (list)
         [ (start, end) ]
+    transEndPieces : (list)
+        [ (start, end) ]
     """
     
-    # Initialize the list of start pieces
+    # Initialize the lists of pieces
     transStartPieces = []
+    transEndPieces = []
     # Initiate how much is left to progress to escape the end
     remaining = int(endLength)
     # For each exon (ordered last-to-first wrt/ strand)
@@ -789,8 +811,14 @@ def getTransStart(exons, endLength, strd):
         if remaining > 0:
             # Measure the size of the exon
             exLen = eEnd - eStart
-            # If longer than the remainder, add the escaped part of the exon
-            if exLen > remaining:
+            # If not longer than the remainder, add the entire exon to ends
+            if exLen <= remaining:
+                transEndPieces.append((eStart, eEnd))
+            # Otherwise add the remainder to end pieces and the escaped part of
+            #  the exon to starts
+            else:
+                transEndPieces.append((eEnd - remaining, eEnd) if strd
+                                      else (eStart, eStart + remaining))
                 transStartPieces.append((eStart, eEnd - remaining) if strd
                                         else (eStart + remaining, eEnd))
             # Either way, decrease the remainder by the exon length
@@ -799,10 +827,10 @@ def getTransStart(exons, endLength, strd):
         else:
             transStartPieces.append((eStart, eEnd))
     
-    return transStartPieces
+    return transStartPieces, transEndPieces
     
     
-def getTransEndSensSpec(endLength, bamfile, BLdata):
+def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons):
     """Function to provide data for a ROC curve for various transcript end
     lengths.
     
@@ -816,6 +844,9 @@ def getTransEndSensSpec(endLength, bamfile, BLdata):
         Baseline data needed for Sens & Spec calulations, such that
         ( { strd : { ref : [ Transcript ] } }, { strd : { ref : [ exon ] } },
          Pos, Neg )
+    includeIntrons : (bool)
+        Whether (positive or negative) coverage of introns should also be
+        considered.
 
     Returns
     -------
@@ -825,9 +856,9 @@ def getTransEndSensSpec(endLength, bamfile, BLdata):
     specificity : (float)
         Proportion of non-covered exon bps not overlapped by transcript ends:
         TN / (TN + FP)
-    transStartsByStrdRef : (dict)
-        { strd : { refName : [ (start, end) ] } } for exon pieces not covered
-        by transcript ends.
+    eachTransStartByStrdRef : (dict)
+        { strd : { refName : [ ( (start, end), ... ) ] } } for start exon
+        pieces for each covered transcript.
     FN : (int)
         The total RNA-seq coverage in exon-wise transcript starts.
     TN : (int)
@@ -847,7 +878,7 @@ def getTransEndSensSpec(endLength, bamfile, BLdata):
     #  = NON-ENDS / NON-COVERAGE
     # 
     # Do this for multiple end lengths & make ROC
-    # !!! Only consider genes with coverage (expressed)!
+    # !!! Only consider transcripts with coverage (expressed)!
     #
     # In order to get accuracy, the following is needed: TP, FP, TN, FN
     # This is binarized wrt/ the expected coverage: >= / <
@@ -856,7 +887,7 @@ def getTransEndSensSpec(endLength, bamfile, BLdata):
     print('Checking transcript ends of length {}...'.format(endLength))
     
     # Initialize the baseline data
-    covTransByStrdRef, covExonsByStrdRef, Pos, Neg = BLdata
+    covTransByStrdRef, Pos, Neg = BLdata
     
     bam = pysam.AlignmentFile(bamfile, 'rb')
 
@@ -867,25 +898,47 @@ def getTransEndSensSpec(endLength, bamfile, BLdata):
     #  FN ~ Total coverage in outside exon-wise ends
     #  TN ~ Number of bp with 0 coverage outside exon-wise ends
     
-    # Initialize a dictionary to save refStarts:
-    transStartsByStrdRef = collections.defaultdict(dict)
+    # Initialize a dictionary to save transcript starts for later use:
+    eachTransStartByStrdRef = collections.defaultdict(
+        lambda: collections.defaultdict(list))
     # Go over each strand and reference separately
     for strd, covTransByRef in covTransByStrdRef.items():
         for refname, trans in covTransByRef.items():
-            # Initiate the flattened exon-wise transcript end pieces for
-            #  this reference
-            transEndPieces = []
-            # Iterate through previously found transcripts to extract &
-            #  save exon-wise endpieces of given length for each
+            # Initiate the flattened (exon-wise) transcript end pieces for this
+            #  reference
+            allTransEndPieces = []
+            # Iterate through covered transcripts to extract & start & end
+            #  pieces of given length for each
             for Tran in trans:
-                transEndPieces.extend(getTransEnding(Tran.exons,
-                                                     endLength,
-                                                     strd))            
-            # Flatten the transEndPieces
-            transEndPieces = flattenIntervals(transEndPieces)
+                if includeIntrons:
+                    # If the transcipt is no longer than end length, add the
+                    #  entire transcript to ends and add no starts
+                    if Tran.end - Tran.start <= endLength:
+                        transEndPieces = [(Tran.start, Tran.end)]
+                        transStartPieces = []
+                    # Otherwise add both exon-wise and absolute transcript ends
+                    else:
+                        transEndPieces = getTransEnding(Tran.exons, endLength,
+                                                        strd)                    
+                        transEndPieces.append(
+                            (Tran.end - endLength, Tran.end) if strd
+                            else (Tran.start, Tran.start + endLength))
+                        transEndPieces = flattenIntervals(transEndPieces)
+                        transStartPieces = removeOverlaps(
+                            [(Tran.start, Tran.end)], transEndPieces)
+                else:
+                    transStartPieces, transEndPieces = getTransStartEnding(
+                        Tran.exons, endLength, strd)
+                # Add the flattened ends and starts (if any) to the resp lists
+                allTransEndPieces.extend(transEndPieces)
+                if transStartPieces != []:
+                    eachTransStartByStrdRef[strd][refname].append(
+                        tuple(transStartPieces))
+            # Flatten the allTransEndPieces
+            allTransEndPieces = flattenIntervals(allTransEndPieces)
             # For each reference (on each strand), extract and add the exon
-            #  coverage and non-covBP for the exon-wise end pieces
-            for pStart, pEnd in transEndPieces:
+            #  coverage and non-covBP for the end pieces
+            for pStart, pEnd in allTransEndPieces:
                 endsCov = np.sum(bam.count_coverage(contig = refname,
                                                     start = pStart,
                                                     stop = pEnd,
@@ -895,24 +948,23 @@ def getTransEndSensSpec(endLength, bamfile, BLdata):
                                  axis = 0)
                 TP += np.sum(endsCov)
                 FP += np.count_nonzero(endsCov == 0)
-            # Remove the portions of flattened exons overlapped by
-            #  endpieces and save as starts
-            transStartsByStrdRef[strd][refname] = removeOverlaps(
-                covExonsByStrdRef[strd][refname],
-                transEndPieces)
             
     bam.close()
     # Calculate the results
-    FN = Pos - TP
     TN = Neg - FP
     sensitivity = TP / Pos
     specificity = TN / Neg
+    if not 0 <= sensitivity <= 1:
+        raise Exception("Sensitivity is {}.".format(sensitivity))
+    if not 0 <= specificity <= 1:
+        raise Exception("Specificity is {}.".format(specificity))
     
-    return sensitivity, specificity, transStartsByStrdRef, FN, TN
+    return sensitivity, specificity, eachTransStartByStrdRef
 
 
 def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
-                   endLenMin, endLenMax, tROC = {}, product = False):
+                   endLenMin, endLenMax, tROC = {}, product = False,
+                   includeIntrons = False):
     """A gradient descent-like wrapper funciton around getTransEndSensSpec() to
     manage result generation & collection. This function maximizes Youden's J
     statistic (Sensitivity + Specificity - 1) across exon-wise transcript
@@ -954,7 +1006,8 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
         return tROC
     
     # Get the baseline data
-    BLdata = getBaselineData(out_transBaselineData, out_db, bamfile)
+    BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
+                             includeIntrons)
     
     # Start with min, mid, and max and then apply the repetitive algorithm
     #  until 'covergence'
@@ -962,7 +1015,8 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
                    np.mean((endLenMin, endLenMax), dtype = int),
                    endLenMax):
         if endLen not in tROC:
-            tROC[endLen] = getTransEndSensSpec(endLen, bamfile, BLdata)
+            tROC[endLen] = getTransEndSensSpec(endLen, bamfile, BLdata,
+                                               includeIntrons)
         
     # Always look at the midpoint between the endLen with the largest
     #  Sens*Spec product and an adjacent endLen, alternating above or below.
@@ -1014,132 +1068,20 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
                 (lenToC, checkedLens[j])[lookAbove]))
             checkedJustAboveBelow[lookAbove] = True
         else:
-            tROC[lenToC] = getTransEndSensSpec(lenToC, bamfile, BLdata)
+            tROC[lenToC] = getTransEndSensSpec(lenToC, bamfile, BLdata,
+                                               includeIntrons)
     
-    print('The optimal end length is {}.'.format(optLen))
+    print('The final optimal end length is {}.'.format(optLen))
     savePKL(out_TransEndROC, tROC)
     
     return tROC
 
 
-def getSNREndROC(tROC, lenToSNRs, out_SNREndROC, bamfile, product = False):
-    """This alhorithm goes over ALL SNR lengths exactly once to determine the
-    sensitivity and specificity of coverage captured by the SNR pieces. This is
-    different from the transcript end algorithm, where there are many more
-    possibilities and info on one end length is relatively independent of the
-    others. In case of SNR lengths, we are interested in aggregating info about
-    all SNRs above some threshold, so it makes sense to scan all of them in
-    decreasing order exactly once. As an added benefit, the function *could*
-    also coverge/terminate as soon as J statistic starts decreasing, as only
-    one local maximum is assumed. (Not implemented.)
-    Note that this function hass been replaced by getSNRcovByGene().
-    
-    Parameters
-    ----------
-    tROC : (dict)
-        { endlength : (Sens, Spec, transStartsByStrdRef, FN, TN) }
-    lenToSNRs : (dict)
-        { SNRlength : [ SNR ] }
-    out_SNREndROC : (str)
-        Location where the output of this function should be stored.
-    bamfile : (str)
-        Location of the bamfile to be scanned.
-
-    Returns
-    -------
-    snrROC : (dict)
-        { covLength : (sensitivity, specificity) }
-    """
-    
-    # If the file already exists, simply load
-    if os.path.isfile(out_SNREndROC):
-        snrROC = loadPKL(out_SNREndROC)
-        return snrROC
-    
-    snrROC = {}
-    
-    # Get the optimal length using the J statistic & announce
-    optEndLen = max(tROC, key = lambda l: (tROC[l][0] * tROC[l][1] if product
-                                           else tROC[l][0] + tROC[l][1] - 1))
-    print('The optimal coverage distance length is {}. Getting ROC across ' \
-          'SNR lengths...'.format(optEndLen))
-    # Extract the transROC data for this length
-    transStartsByStrdRef = tROC[optEndLen][2]
-    # The SNR length cutoff will describe the minimal SNR length included in
-    #  non-canonical coverage. For SNRs at each length, flatten the SNRends and
-    #  then find where they overlap with the transStarts & get the coverage
-    SNRpiecesByStrdRef = collections.defaultdict(
-        lambda: collections.defaultdict(list))
-    Pos = tROC[optEndLen][3]
-    Neg = tROC[optEndLen][4]
-    # "POSITIVE" ~ Inside exon-wise SNR pieces
-    TP = 0  # Total coveragee in exon-wise pieces
-    # "NEGATIVE" ~ Outside exon-wise SNR pieces
-    TN = Neg  # BPs with 0 coverage outside exon-wise pieces
-    
-    bam = pysam.AlignmentFile(bamfile, 'rb')
-    # Start with the longest length whose data will be included in all
-    #  subsequent calculations. Always extract only the newly added pieces and
-    #  add the coverage data (TP/FP/TN/FN) to the already existing for speed.
-    for length in sorted(lenToSNRs, reverse = True):
-        print('Checking coverage for SNRs of length {}+...'.format(length))
-        # Work by strand and reference
-        for strd, transStartsByRef in transStartsByStrdRef.items():
-            for refName, transStarts in transStartsByRef.items():
-                newSNRpieces = []
-                # Get & flatten the SNRs' pieces at this length/strd/ref
-                for SNR in lenToSNRs[length]:
-                    # Filter the SNRs by strd and ref
-                    if SNR.strand == strd and SNR.record == refName:
-                        start = SNR.start - optEndLen if strd else SNR.end
-                        end = SNR.start if strd else SNR.end + optEndLen
-                        newSNRpieces.append((start, end))
-                # Flatten the newSNRpieces
-                newSNRpieces = flattenIntervals(newSNRpieces)
-                # Retain only where these overlap with the transStarts (exons)
-                newSNRpieces = getOverlaps(newSNRpieces, transStarts)
-                # Remove already covered areas so only new ones are measured
-                newSNRpieces = removeOverlaps(
-                    newSNRpieces, SNRpiecesByStrdRef[strd][refName])                
-                # Measure the coverage of the new pieces
-                for pStart, pEnd in newSNRpieces:
-                    pieceCov = np.sum(
-                        bam.count_coverage(contig = refName,
-                                           start = pStart,   # already 0-based
-                                           stop = pEnd,
-                                           quality_threshold = 0,
-                                           read_callback = lambda r:
-                                               r.is_reverse != strd),
-                        axis = 0)
-                    # Adjust the TP & TN accordingly
-                    TP += np.sum(pieceCov)
-                    TN -= np.count_nonzero(pieceCov == 0)
-                # Add the newSNRpieces to those from previous SNR lengths
-                SNRpiecesByStrdRef[strd][refName].extend(newSNRpieces)
-                # Flatten the SNRs (should contain no overlaps, only adjacency)
-                SNRpiecesByStrdRef[strd][refName] = flattenIntervals(
-                    SNRpiecesByStrdRef[strd][refName])
-        # Save the results
-        sensitivity = TP / Pos
-        specificity = TN / Neg
-        
-        snrROC[length] = sensitivity, specificity
-    
-    bam.close()
-    # Announce the optimal SNR length using the J statistic
-    print('The optimal SNR length is {}.'.format(max(
-        snrROC, key = lambda l: (snrROC[l][0] * snrROC[l][1] if product
-                                 else snrROC[l][0] + snrROC[l][1] - 1))))
-    savePKL(out_SNREndROC, snrROC)
-    
-    return snrROC
-
-
-def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
-                    out_db, bamfile):
+def getSNRcovByTrans(lenToSNRs, tROC, out_snrROC, out_db, bamfile,
+                     product = False):
     """This function gets Sensitivity & Specificity of coverage accounted for
-    by SNRs (in exons only, but NOT exon-wise) in genes (expressed transcripts)
-    in which they occur.
+    by SNRs in expressed transcript starts (defined by the tROC), in which they
+    occur.
     
     Parameters
     ----------
@@ -1164,42 +1106,19 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
         snrROC = loadPKL(out_snrROC)
         return snrROC
     
-    # Get the list of full transcripts by strd & ref
-    BLdata = getBaselineData(out_transBaselineData, out_db, bamfile)
-    covTransByStrdRef = BLdata[0]
+    print('Sorting SNRs by strand and reference...')
+    # Sort SNRs by len, strd & ref
+    SNRsByLenStrdRef = collections.defaultdict(
+        lambda: collections.defaultdict(
+            lambda: collections.defaultdict(list)))
+    for length, SNR in lenToSNRs.items():
+        SNRsByLenStrdRef[length][SNR.strand][SNR.record].append(SNR)
     
-    print('Extracting the exons up to the last {} bp of each expressed' \
-          ' transcript...'.format(covLen))
-    # Precalculate starts (one sorted list of tuples) for each expressed
-    #  transcript based on the optimal endLen & save by strd & ref
-    eachTransStartByStrdRef = collections.defaultdict(
-        lambda: collections.defaultdict(list))
-    for strd, covTransByRef in covTransByStrdRef.items():
-        for ref, trans in covTransByRef.items():
-            for Tran in trans:
-                # Initialize the list of start exons
-                startPieces = []
-                # Initiate how much is left to progress to escape the end
-                remaining = int(covLen)
-                # For each exon (ordered last-to-first wrt/ strand)
-                for eStart, eEnd in sorted(Tran.exons, reverse = strd):
-                    # If end has not been escaped yet
-                    if remaining > 0:
-                        # Measure the size of the exon
-                        exLen = eEnd - eStart
-                        # If longer than the remainder, add the escaped part of
-                        #  the exon
-                        if exLen > remaining:
-                            startPieces.append(
-                                (eStart, eEnd - remaining) if strd
-                                else (eStart + remaining, eEnd))
-                        # Either way, decrease the remainder by the exon length
-                        remaining -= exLen
-                    # Otherwise add the entire exon as is
-                    else:
-                        startPieces.append((eStart, eEnd))
-                # Append (not extend!) each exon list as a tuple
-                eachTransStartByStrdRef[strd][ref].append(tuple(startPieces))
+    # Derive the best transcript end length, which is also the SNR coverage len
+    covLen = max(tROC, key = lambda l: (tROC[l][0] * tROC[l][1] if product
+                                        else tROC[l][0] + tROC[l][1] - 1))
+    # Extract the relevant transcripts starts
+    eachTransStartByStrdRef = tROC[covLen][2]
     
     # Initialize the SNRpieces found on covered exons by strd & ref - coverage
     #  of these will consitute TP & FP measurements
@@ -1208,8 +1127,9 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
     # Initialize the associated measurements that'll be added to over SNR lens
     TP = 0
     FP = 0
-    # Initialize the flattened transStarts whose transcripts had SNRpieces -
-    #  coverage of these will constitute the baseline/denominator for Sens/Spec
+    # Initialize the running dict of flattened transStarts whose transcripts
+    #  have been found to contain SNRpieces - coverage of these will constitute
+    #  the baseline/denominator for Sens/Spec (Pos, Neg)
     flatTransStartsByStrdRef = collections.defaultdict(
         lambda: collections.defaultdict(list))
     # Initialize the associated measurements that'll be added to over SNR lens
@@ -1229,41 +1149,40 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                 # Initialize the list of SNR pieces *specific* for this SNR len
                 newSNRpieces = []
                 # Filter & extract the SNR pieces for each strd/ref
-                for SNR in lenToSNRs[length]:
-                    # Filter the SNRs by strd and ref
-                    if SNR.strand == strd and SNR.record == refName:
-                        start = SNR.start - covLen if strd else SNR.end
-                        end = SNR.start if strd else SNR.end + covLen
-                        newSNRpieces.append((start, end))
+                for SNR in SNRsByLenStrdRef[length][strd][refName]:
+                    start = SNR.start - covLen if strd else SNR.end
+                    end = SNR.start if strd else SNR.end + covLen
+                    newSNRpieces.append((start, end))
                 # Determine which portions of the flattened SNR pieces are NEW
                 #  for this strd/ref, as only those will contribute to
-                #  - adding new transcript starts (exons) and
+                #  - adding new transcript starts (new Pos/Neg info) and
                 #  - new TP/FP coverage information
                 newSNRpieces = removeOverlaps(
                     flattenIntervals(newSNRpieces),
                     SNRpiecesByStrdRef[strd][refName])
                 # These SNR pieces, specific for this SNR length, can overlap
-                #  either the already included (flat list) trans starts, or
-                #  some of the new ones (each list), or both (!)
+                #  either the already included (flat list) expressed tStarts,
+                #  or some of the new ones (each list), or both (!)
                 
-                # Retain overlaps with previously added (flat list) exons:
+                # Retain overlaps with previously added (flat list) tStarts:
                 #  positive selection of SNR pieces based on old transStarts
                 ovSNRpieces = getOverlaps(
                     newSNRpieces, flatTransStartsByStrdRef[strd][refName])
                 
-                # Initialize the list of tStart exons specific for this SNR len
+                # Initialize the list of tStarts specific for this SNR len
                 newTstarts = []
-                # Initialize the list of tStarts whose exons were added
+                # Initialize the set of tStarts that have already been added to
+                #  the flattened list -> to be removed from "discovery"
                 toRemove = set()
                 # For *each* transcript start that had not been added yet:
-                #  positive selection of new transStarts and  SNR pieces based
-                #  on mutual overlap (note: tran is a tuple of exons)
+                #  positive selection of new transStarts and SNR pieces based
+                #  on mutual overlap (note: each tran is a tuple of pieces)
                 for tran in eachTransStartByStrdRef[strd][refName]:
                     # Get the overlaps with SNR pieces specific for this length
                     SNRsInNewTransStart = getOverlaps(newSNRpieces, list(tran))
                     # If there are any,
                     if SNRsInNewTransStart != []:
-                        # Add the overlap to the overlapped SNRpieces
+                        # Add the overlap to the overlapped SNR pieces
                         ovSNRpieces.extend(SNRsInNewTransStart)
                         # Add the transcript start exons to the tStarts aggr
                         newTstarts.extend(tran)
@@ -1272,9 +1191,9 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
                 # Remove the transcript starts from the original dict to
                 #  increase efficiency (not to try to "rediscover" them again
                 #  in the future, since they are already added)
-                eachTransStartByStrdRef[strd][refName] = tuple(
+                eachTransStartByStrdRef[strd][refName] = [
                     tS for tS in eachTransStartByStrdRef[strd][refName]
-                    if tS not in toRemove)
+                    if tS not in toRemove]
                 
                 # Flatten the ovSNRpieces
                 ovSNRpieces = flattenIntervals(ovSNRpieces)
@@ -1339,7 +1258,7 @@ def getSNRcovByGene(covLen, lenToSNRs, out_snrROC, out_transBaselineData,
 
 
 def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
-                   out_transBaselineData, bamfile):
+                   out_transBaselineData, bamfile, includeIntrons = False):
     """Function to get several statistics in order to calculate correlation
     between gene coverage & SNR content. Specifically, it goes over all genes
     and for each gene, it measures its RNA-seq coverage. If > 0, it also gets
@@ -1384,7 +1303,8 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
     # Get a dictionary of SNRs by gene & length
     SNRsByGeneLen = getSNRsByGeneLen(lenToSNRs, concordant = True)
     # Get the list of covered transcripts by strd & ref
-    BLdata = getBaselineData(out_transBaselineData, out_db, bamfile)
+    BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
+                             includeIntrons)
     covTransByStrdRef = BLdata[0]
     # Sort the covered transcripts by geneID
     covTransByGene = collections.defaultdict(list)
@@ -1406,7 +1326,8 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
     # Go over all genes
     for gene in db.features_of_type(featuretype = 'gene'):
         geneID = gene.id
-        if geneID not in covTransByGene: continue
+        if geneID not in covTransByGene:
+            continue
         progressTracker += 1
         newProg = round(progressTracker / totalGenes, 3)
         if newProg != prog:
