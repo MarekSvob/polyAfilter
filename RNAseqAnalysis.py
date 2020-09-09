@@ -93,7 +93,7 @@ def filterReads(filt_bamfile, out_db, out_strandedFeats, bamfile,
     # Connect to the bam file
     bam = pysam.AlignmentFile(bamfile, 'rb')
     
-    # Initiate the varuables needed
+    # Initiate the variables needed
     # This needs to start off as a set to avoid double-adding reads aligned to
     #  two features of the same type
     filt_reads = set()
@@ -106,7 +106,7 @@ def filterReads(filt_bamfile, out_db, out_strandedFeats, bamfile,
             print('Processing {} strand of reference {}'.format(
                 '+' if strd else '-', ref))
             for start, end in feats:
-                for read in bam.fetch(contig = ref, start = start, end = end):
+                for read in bam.fetch(contig = ref, start = start, stop = end):
                     # Make sure the read is on the correct strand before adding
                     if concordant == (read.is_reverse != strd):
                         filt_reads.add(read)
@@ -648,9 +648,8 @@ def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons):
         return covTransByStrdRef, Pos, Neg
     
     # Otherwise initialize the variables    
-    print('Getting baseline data for ROC across exon-wise covered' \
-          'transcripts, {} introns...'.format('including' if includeIntrons
-                                              else 'excluding'))
+    print('Getting baseline data for ROC across covered transcripts, {}' \
+          ' introns...'.format('including' if includeIntrons else 'excluding'))
     covTransByStrdRef = collections.defaultdict(
         lambda: collections.defaultdict(list))
     Pos = 0
@@ -830,7 +829,8 @@ def getTransStartEnding(exons, endLength, strd):
     return transStartPieces, transEndPieces
     
     
-def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons):
+def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
+                        getSensSpec = True):
     """Function to provide data for a ROC curve for various transcript end
     lengths.
     
@@ -938,16 +938,18 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons):
             allTransEndPieces = flattenIntervals(allTransEndPieces)
             # For each reference (on each strand), extract and add the exon
             #  coverage and non-covBP for the end pieces
-            for pStart, pEnd in allTransEndPieces:
-                endsCov = np.sum(bam.count_coverage(contig = refname,
-                                                    start = pStart,
-                                                    stop = pEnd,
-                                                    quality_threshold = 0,
-                                                    read_callback = lambda r:
-                                                        r.is_reverse != strd),
-                                 axis = 0)
-                TP += np.sum(endsCov)
-                FP += np.count_nonzero(endsCov == 0)
+            if getSensSpec:
+                for pStart, pEnd in allTransEndPieces:
+                    endsCov = np.sum(
+                        bam.count_coverage(contig = refname,
+                                           start = pStart,
+                                           stop = pEnd,
+                                           quality_threshold = 0,
+                                           read_callback = lambda r:
+                                               r.is_reverse != strd),
+                            axis = 0)
+                    TP += np.sum(endsCov)
+                    FP += np.count_nonzero(endsCov == 0)
             
     bam.close()
     # Calculate the results
@@ -1077,28 +1079,53 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     return tROC
 
 
-def getSNRcovByTrans(lenToSNRs, tROC, out_snrROC, out_db, bamfile,
-                     product = False):
+def sortSNRsByLenStrdRef(lenToSNRs):
+    """Helper function to pre-sort SNRs by length, strand, and reference.
+    
+    Parameters
+    ----------
+    lenToSNRs : (dict)
+        { SNR length : [ SNR ] }
+
+    Returns
+    -------
+    SNRsByLenStrdRef : (dict)
+        { SNR length : { strand : { reference : [ SNR ] } } }
+    """
+    
+    print('Sorting SNRs by length, strand, and reference...')
+    SNRsByLenStrdRef = collections.defaultdict(
+        lambda: collections.defaultdict(
+            lambda: collections.defaultdict(list)))
+    for length, SNRs in lenToSNRs.items():
+        for SNR in SNRs:
+            SNRsByLenStrdRef[length][SNR.strand][SNR.record].append(SNR)
+        
+    return SNRsByLenStrdRef
+
+
+def getSNRcovByTrans(lenToSNRs, tROC, out_snrROC, bamfile, product = False):
     """This function gets Sensitivity & Specificity of coverage accounted for
     by SNRs in expressed transcript starts (defined by the tROC), in which they
     occur.
     
     Parameters
     ----------
-    covLen : (int)
-        The optimal length of coverage with respect to the potential priming
-        location.
-    BLdata : (tuple)
-        (covTransByStrdRef, covExonsByStrdRef, Pos, Neg)
     lenToSNRs : (dict)
         { SNR length : [ SNR ] }
+    tROC : (dict)
+        { endLen : ( Sensitivity, Specificity, Accuracy ) }
+    out_snrROC : (str)
+        Location of this function's saved output.
     bamfile : (str)
         Location of the bamfile to be scanned.
-
+    product : (bool)
+        Whether the product or J statistic is optimized. The default is False.
+        
     Returns
     -------
     snrROC : (dict)
-        { SNR length : (Sensitivity, Specificity) }
+        { SNR length : ( Sensitivity, Specificity ) }
     """
     
     # If the file already exists, simply load
@@ -1106,13 +1133,8 @@ def getSNRcovByTrans(lenToSNRs, tROC, out_snrROC, out_db, bamfile,
         snrROC = loadPKL(out_snrROC)
         return snrROC
     
-    print('Sorting SNRs by strand and reference...')
-    # Sort SNRs by len, strd & ref
-    SNRsByLenStrdRef = collections.defaultdict(
-        lambda: collections.defaultdict(
-            lambda: collections.defaultdict(list)))
-    for length, SNR in lenToSNRs.items():
-        SNRsByLenStrdRef[length][SNR.strand][SNR.record].append(SNR)
+    # Sort SNRs by len, strd & ref        
+    SNRsByLenStrdRef = sortSNRsByLenStrdRef(lenToSNRs)
     
     # Derive the best transcript end length, which is also the SNR coverage len
     covLen = max(tROC, key = lambda l: (tROC[l][0] * tROC[l][1] if product
@@ -1187,7 +1209,7 @@ def getSNRcovByTrans(lenToSNRs, tROC, out_snrROC, out_db, bamfile,
                         # Add the transcript start exons to the tStarts aggr
                         newTstarts.extend(tran)
                         # Add the transcript start to the removal list
-                        toRemove |= {tran}
+                        toRemove.add(tran)
                 # Remove the transcript starts from the original dict to
                 #  increase efficiency (not to try to "rediscover" them again
                 #  in the future, since they are already added)
