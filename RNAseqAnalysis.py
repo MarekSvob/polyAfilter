@@ -276,17 +276,11 @@ def getCovPerSNR(out_SNRCovLen, out_SNROutl, lenToSNRs, out_db,
                     mid = (SNR.end + SNR.start) // 2
                     start = int(mid - window / 2)
                     stop = int(mid + window / 2)
-                    # Include correctins for the start & end if the window
+                    # Include corrections for the start & end if the window
                     #  falls out of the reference size range
-                    if start < 0:
-                        corrStart = 0
-                    else:
-                        corrStart = start
                     refLen = bam.get_reference_length(SNR.record)
-                    if stop > refLen:
-                        corrStop = refLen
-                    else:
-                        corrStop = stop
+                    corrStart = max(0, start)
+                    corrStop = min(refLen, stop)
                     # Get the coverage summed over A/T/C/G; count only
                     #  reads on the same (conc) or opposite (disc) strand
                     refCov = np.sum(
@@ -397,14 +391,8 @@ def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
                 stop = int(mid + window / 2)
                 # Include correctins for the start & end if the window
                 #  falls out of the reference size range
-                if start < 0:
-                    corrStart = 0
-                else:
-                    corrStart = start
-                if stop > refLen:
-                    corrStop = refLen
-                else:
-                    corrStop = stop
+                corrStart = max(0, start)
+                corrStop = min(refLen, stop)
                 # Get the coverage summed over A/T/C/G; count only concordant
                 refCoverage = np.sum(
                     bam.count_coverage(contig = ref,
@@ -977,7 +965,7 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
 
     Parameters
     ----------
-    out_transROC : (str)
+    out_TransEndROC : (str)
         Path to the saved output, if done before.
     out_transBaselineData : (str)
         Path to the saved baseline data, if done before.
@@ -995,6 +983,8 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
         Indicates whether the optimization is guided by maximizing the product
         of Sens*Spec; otherwise the J statistic (Sens+Spec-1) is used. The
         default is False.
+    includeIntrons : (bool), optional
+        Indicates whether to consider intron coverage. The default is False.
 
     Returns
     -------
@@ -1168,16 +1158,17 @@ def getSNRcovByTrans(lenToSNRs, tROC, out_snrROC, bamfile, product = False):
         # For each length, go over each strd & ref of trans starts
         for strd in eachTransStartByStrdRef.keys():
             for refName in eachTransStartByStrdRef[strd].keys():
+                refLen = bam.get_reference_length(refName)
                 # Initialize the list of SNR pieces *specific* for this SNR len
                 newSNRpieces = []
                 # Extract the SNR pieces for this strd/ref
                 for SNR in SNRsByLenStrdRef[length][strd][refName]:
                     if strd:
-                        start = SNR.start - covLen
+                        start = max(0, SNR.start - covLen)
                         end = SNR.start
                     else:
                         start = SNR.end
-                        end = SNR.end + covLen
+                        end = min(refLen, SNR.end + covLen)
                     newSNRpieces.append((start, end))
                 # Determine which portions of the flattened SNR pieces are NEW
                 #  for this strd/ref, as only those will contribute to
@@ -1362,6 +1353,7 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
             clear_output(wait = True)
         strd = gene.strand == '+'
         refName = gene.seqid
+        refLen = bam.get_reference_length(refName)
         # Extract all exons from this gene's covered transcripts
         geneExons = [(eS, eE) for Trans in covTransByGene[geneID]
                      for eS, eE in Trans.exons]
@@ -1412,8 +1404,12 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
             for length, SNRs in SNRsByGeneLen[geneID].items():
                 if length >= minSNRlen:
                     for SNR in SNRs:
-                        start = SNR.start - covLen if strd else SNR.end
-                        end = SNR.start if strd else SNR.end + covLen
+                        if strd:
+                            start = max(0, SNR.start - covLen)
+                            end = SNR.start
+                        else:
+                            start = SNR.end
+                            end = min(refLen, SNR.end + covLen)
                         # Count this SNR if its piece overlaps with gene exons
                         exonPieceOverlaps = getOverlaps([(start, end)],
                                                         geneExons)

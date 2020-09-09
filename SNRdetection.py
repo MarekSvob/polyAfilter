@@ -177,9 +177,9 @@ def getPieces(base, fasta, cpus, cFR):
         for ch in SeqIO.parse(genome, 'fasta'):     
             first = 0
             last = unit - pieceLen
-            
+            chLen = len(ch.seq)
             # Keep adding slices until 'last' has exceeded the record length
-            while last < len(ch.seq):
+            while last < chLen:
                 # If the current last base is one to be avoided, move on
                 if ch.seq[last] in avoid:
                     last += 1
@@ -190,7 +190,7 @@ def getPieces(base, fasta, cpus, cFR):
                     last += unit - pieceLen
             # Once the end of the record is reached, add the last piece and
             #  move on to the next record
-            last = len(ch.seq)
+            last = chLen
             addSlice()
         # Once all the records have been scanned, add the last piece to the
         #  master list (unless just added, which is unlikely)

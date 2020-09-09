@@ -16,6 +16,35 @@ from SNRanalysis import flattenIntervals, getOverlaps
 
 def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData, 
               out_db, out_bamfile, tROC = {}, includeIntrons = False):
+    """Function that filters a BAM file to remove non-canonical reads that
+    likely resulted from poly(dT) priming onto genomically encoded polyA single
+    nucleotide repeats (SNRs), as opposed to mRNA polyA tails.    
+
+    Parameters
+    ----------
+    lenToSNRs : (dict)
+        { SNR length : [ SNR ] }
+    covLen : (int)
+        The assumed distance between the priming event and read coverage.
+    minSNRlen : (int)
+        The shortest SNR length to consider.
+    bamfile : (str)
+        Location of the bamfile to be filtered.
+    out_transBaselineData : (str)
+        Path to the saved baseline data, if done before.
+    out_db : (str)
+        Path to the saved GTF/GFF database.
+    out_bamfile : (str)
+        Location of the resulting filtered bamfile.
+    tROC : (dict), optional
+        { endLen : ( Sensitivity, Specificity, Accuracy ) }. The default is {}.
+    includeIntrons : (bool), optional
+        Indicates whether to consider intron coverage. The default is False.
+
+    Returns
+    -------
+    None.
+    """
     
     
     # If the BAM file already exists, do not overwrite
@@ -44,6 +73,7 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
             print('{} - Identifying the reads to be removed on reference {}' \
                   '{}...'.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                                  refName, '+' if strd else '-'))
+            refLen = bam.get_reference_length(refName)
             # Flatten all the expressed transcript starts on this strd/ref
             flatStarts = []
             for tStart in eachTransStart:
@@ -59,8 +89,12 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
                 for length, SNRsByStrdRef in SNRsByLenStrdRef.items():
                     if length >= minSNRlen:
                         for SNR in SNRsByStrdRef[strd][refName]:
-                            start = SNR.start - covLen if strd else SNR.end
-                            end = SNR.start if strd else SNR.end + covLen
+                            if strd:
+                                start = max(0, SNR.start - covLen)
+                                end = SNR.start
+                            else:
+                                start = SNR.end
+                                end = min(refLen, SNR.end + covLen)
                             SNRpieces.append((start, end))
                 SNRpieces = flattenIntervals(SNRpieces)
                 # Find overlaps between SNRpieces & tStarts
