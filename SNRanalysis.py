@@ -327,7 +327,15 @@ def flattenIntervals(intervals):
     intervals.sort(key = lambda interval: interval[0])
     # Initialize the first 'current' interval
     currentStart, currentEnd = intervals[0]
+    # Make sure that this is indeed a valid interval
+    if currentStart >= currentEnd:
+        raise Exception("Interval's start [{}] >= end [{}]!".format(
+            currentStart, currentEnd))
     for iStart, iEnd in intervals[1:]:
+        # Make sure that this is indeed a valid interval
+        if iStart >= iEnd:
+            raise Exception("Interval's start [{}] >= end [{}]!".format(iStart,
+                                                                        iEnd))
         # If the new interval overlaps the existing, merge by updating the end.
         # Note that when iStart = currentEnd, this is technically an adjacency
         #  (not overlap) but even then a merge is desirable, nevertheless.
@@ -535,7 +543,9 @@ def nonOverlapCheck(intervals):
     oldEnd = 0
     for newStart, newEnd in intervals:
         if newStart < oldEnd:
-            raise Exception('The intervals overlap!')
+            raise Exception('The intervals overlap! [newStart = {}, newEnd ' \
+                            '= {}, oldEnd = {}]'.format(newStart, newEnd,
+                                                        oldEnd))
         # Note that if newStart == oldEnd, they are adjacent
         else:
             oldEnd = newEnd

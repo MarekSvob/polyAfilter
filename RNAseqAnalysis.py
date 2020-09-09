@@ -1170,10 +1170,14 @@ def getSNRcovByTrans(lenToSNRs, tROC, out_snrROC, bamfile, product = False):
             for refName in eachTransStartByStrdRef[strd].keys():
                 # Initialize the list of SNR pieces *specific* for this SNR len
                 newSNRpieces = []
-                # Filter & extract the SNR pieces for each strd/ref
+                # Extract the SNR pieces for this strd/ref
                 for SNR in SNRsByLenStrdRef[length][strd][refName]:
-                    start = SNR.start - covLen if strd else SNR.end
-                    end = SNR.start if strd else SNR.end + covLen
+                    if strd:
+                        start = SNR.start - covLen
+                        end = SNR.start
+                    else:
+                        start = SNR.end
+                        end = SNR.end + covLen
                     newSNRpieces.append((start, end))
                 # Determine which portions of the flattened SNR pieces are NEW
                 #  for this strd/ref, as only those will contribute to
