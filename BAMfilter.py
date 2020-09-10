@@ -111,32 +111,34 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
                         if mapping != []:
                             toRemove.add(read)
     
-    print('{} - Filtering out reads from the BAM file...'.format(
-        datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-    # Go over all aligned reads in the bam file, removing the relevant reads
-    toKeep = [read for read in bam.fetch() if read not in toRemove]
-    print('{} - Sorting the BAM file...'.format(
-        datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-    # Reads must be sorted for indexing
-    toKeep.sort(key = lambda x:
-                (x.reference_id, x.reference_start, x.reference_length))
+    # print('{} - Filtering out reads from the BAM file...'.format(
+    #     datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    # # Go over all aligned reads in the bam file, removing the relevant reads
+    # toKeep = [read for read in bam.fetch() if read not in toRemove]
+    # print('{} - Sorting the BAM file...'.format(
+    #     datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    # # Reads must be sorted for indexing
+    # toKeep.sort(key = lambda x:
+    #             (x.reference_id, x.reference_start, x.reference_length))
     
     print('{} - Writing the filtered BAM file...'.format(
         datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
     # Create the bamfile to add the reads
     filtBAM = pysam.AlignmentFile(out_bamfile, 'wb', template = bam)
     # Add the reads in order
-    for read in toKeep:
-        filtBAM.write(read)
+    # for read in toKeep:
+    for read in bam.fetch():
+        if read not in toRemove:
+            filtBAM.write(read)
     # Close the files
     filtBAM.close()
     bam.close()
     
-    print('{} - Indexing the filtered BAM file...'.format(
-        datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-    pysam.index(filtBAM)
+    # print('{} - Indexing the filtered BAM file...'.format(
+    #     datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    # pysam.index(filtBAM)
     
-    print('{} - A filtered bam file has been created and indexed.'.format(
+    print('{} - A filtered bam file has been created.'.format(
         datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
         
     
