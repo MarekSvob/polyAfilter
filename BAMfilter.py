@@ -121,8 +121,8 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     # toKeep.sort(key = lambda x:
     #             (x.reference_id, x.reference_start, x.reference_length))
     
-    print('{} - Writing the filtered BAM file...'.format(
-        datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    print('{} - Writing the filtered BAM file, excluding {} reads...'.format(
+        datetime.now().strftime('%Y-%m-%d %H:%M:%S'), len(toRemove)))
     # Create the bamfile to add the reads
     filtBAM = pysam.AlignmentFile(out_bamfile, 'wb', template = bam)
     # Add the reads in order
