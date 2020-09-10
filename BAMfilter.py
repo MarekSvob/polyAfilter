@@ -69,7 +69,7 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     
     # Go over each strand and ref separately
     for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
-        for refName, eachTransStart in eachTransStartByRef.itmes:
+        for refName, eachTransStart in eachTransStartByRef.items:
             print('{} - Identifying the reads to be removed on reference {}' \
                   '{}...'.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                                  refName, '+' if strd else '-'))
