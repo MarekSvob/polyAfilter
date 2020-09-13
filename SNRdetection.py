@@ -16,6 +16,7 @@ import shutil
 from Bio import SeqIO
 from multiprocessing import Pool
 from random import randint
+from datetime import datetime
 
 
 # Global result, tracking, and help variables to be initiated
@@ -59,7 +60,7 @@ class SNR:
         self.record = record    # str, record (chromosome) where SNR is found
         self.start = start      # int, start of the SNR locus
         self.end = end          # int, end of the SNR locus
-        self.mism = mism        # int, number of mismatches 
+        self.mism = mism        # int, position of a mismatch (0 when None)
         self.strand = strand    # bool: T (+) or F (-)
         self.concFeats = cFeats # set, GFFdb features on the respective strand,
         self.discFeats = dFeats #  such as region, gene, exon, transcript, etc.
@@ -68,7 +69,7 @@ class SNR:
                                 #  & whether it is in an exon wrt/ this gene
 
     def __str__(self):
-        # Displays the base, number of mismatches, and location
+        # Displays the base, position of a mismatch (if any), and location
         return 'poly({})[-{}] @ {}:{:,}-{:,}'.format(
             self.base if self.strand else compDict[self.base],
             self.mism,
@@ -209,9 +210,7 @@ def getPieces(base, fasta, cpus, cFR):
     
 def findSNRs(base, piece, db_out, temp, minFeatLen, minSNRlen):
     """Function to scan a given reference sequence (range) & find unique SNRs
-    of given base type and length with given maximum number of mismatches
-    allowed, such that the SNR contains mostly the primary bases and starts &
-    ends with the primary base
+    of given base type and length.
     
     Parameters
     ----------
@@ -228,7 +227,8 @@ def findSNRs(base, piece, db_out, temp, minFeatLen, minSNRlen):
         processing time. (Note that all SNRs will be still counted.)
     minSNRlen : (int)
         The minimal length of the SNRs saved; limited to save storage space
-        needed. (Note that all SNRs will be still counted.)
+        needed. (Note that all SNRs will be still counted.) minSNRlen needs to
+        be no less than minFeatLen.
 
     Returns
     -------
@@ -252,8 +252,8 @@ def findSNRs(base, piece, db_out, temp, minFeatLen, minSNRlen):
     lenToDiscFeats = collections.defaultdict(collections.Counter)
     
     # Make a temporary copy of the db file for this thread to speed up the
-    #  process (SQLite3 dbs do not truly support parallel inquiries)
-    #  more info: https://github.com/mapbox/node-sqlite3/issues/408
+    #  process (SQLite3 dbs do not truly support parallel inquiries; more info:
+    #  https://github.com/mapbox/node-sqlite3/issues/408)
     temp_f = tempfile.NamedTemporaryFile(suffix = '.db', dir = temp)
     shutil.copy(db_out, temp_f.name)
     
@@ -350,6 +350,140 @@ def findSNRs(base, piece, db_out, temp, minFeatLen, minSNRlen):
     temp_f.close()
     
     return lenToSNRs, lenToSNRcounts, lenToConcFeats, lenToDiscFeats
+
+
+def findSNRsWMism(base, piece, minSNRlen = 5, verbose = False,
+                  SNRsByLenStrdRef = collections.defaultdict(
+                      lambda: collections.defaultdict(
+                          lambda: collections.defaultdict(list)))):
+    """A faster version of findSNRs w/o any database lookup (of featureTypes
+    or genes), with 1 mismatch allowed in a non-terminal position. Note that 2
+    SNRs with 1 mismatch each may overlap if they constitute of 3 blocks
+    separated by 2 single bp mismatches.
+
+    Parameters
+    ----------
+    base : (str)
+        DNA base constituting SNRs to be searched for: "A", "T", "C", "G", "N"
+    piece : (list)
+        A list of splits, such that: [ (record, start, sequence) ]
+    minSNRlen : (int)
+        The minimal length of the SNRs saved; limited to save storage space
+        needed.
+    SNRsByLenStrdRef : (dict)
+        { length : { strd : { ref : [ SNRs ] } } }
+
+    Returns
+    -------
+    SNRsByLenStrdRef : (dict)
+        { length : { strd : { ref : [ SNRs ] } } }
+    """
+    
+    # Define the complement base to be sought
+    cBase = compDict[base]
+    
+    # For each slice in the piece
+    for s in piece:
+        # Save the ref name & the 1st bp#
+        ref = s[0]
+        bp0 = s[1]
+        # Announce progress, if desired
+        if verbose:
+            print('{} - Looking for SNRs with 1 mismatch on reference "{}",' \
+                  ' starting @ bp {:,}...'.format(datetime.now(), ref, bp0))
+        # Save the sequence to scan & initialize trackers
+        refseq = s[2]
+        first = 0
+        end = len(refseq)
+        # Keep scanning the sequence until the end is reached
+        while first < end:
+            # Initiate the last base of the potential new SNR
+            last = first + 1
+            # Initiate the mismatch indicator (0 when None yet)
+            mism = 0
+            # Test the base & its complement at the beginning of each new SNR
+            for b in (base, cBase):
+                # If found, keep testing the subsequent bases for this base in
+                #  either caps or non-caps
+                eitherCaps = capsDict[b]
+                if refseq[first] in eitherCaps:
+                    # Initialize the indicator that this is the initial SNR
+                    #  found; if not, do not save SNRs without mismatches
+                    initial = True
+                    # Keep checking for the same base after the SNR was added
+                    #  if the stretch after the mismatch could be a start of a
+                    #  new SNR
+                    while True:
+                        # As long as last hasn't reached the end of the record
+                        #  AND the same base is found on the subsequent
+                        #  position OR this is the first mismatch, keep
+                        #  increasing the "last" index of the range confirmed
+                        while last < end:
+                            if refseq[last] in eitherCaps:
+                                last += 1
+                            # If this is the 1st mismatch, record its position
+                            elif not mism:
+                                mism = last
+                                last += 1
+                            else:
+                                break
+                        
+                        # If the last two bases checked were both mismatches,
+                        #  this is an SNR without a mismatch; move last to the
+                        #  position of the first mismatch & do not keep
+                        #  checking for the same base (no "continue")
+                        if last == mism + 1:
+                            last = mism
+                            # If this is not the initial SNR, do not save
+                            #  (this portion was already saved as a part of
+                            #  another SNR)
+                            if not initial:
+                                break
+                            
+                        # Calculate the length of the SNR
+                        length = last - first
+                        # If the SNR is long enough, add it to the sorted dict
+                        if length >= minSNRlen:
+                            strd = b == base
+                            SNRsByLenStrdRef[length][strd][ref].append(
+                                SNR(base, ref, bp0 + first, bp0 + last,
+                                    mism - first, strd, set(), {}, set(), {}))
+                        
+                        # If there was only 1 match after the mismatch, start
+                        #  checking for the next SNR at the site of mismatch
+                        #  (first <= last <= mism; because the last match could
+                        #  be the 1st mismatch in the new SNR); note that this
+                        #  is only done after the SNR was already saved with
+                        #  the true last; do not keep checking for the same
+                        #  base (no "continue")
+                        if last == mism + 2:
+                            last = mism
+                        
+                        # If the stretch after the mismatch could be a start of
+                        #  a new SNR, continue testing for the same base and
+                        #  reset the first; reset the last & mism as if this
+                        #  was the first mismatch
+                        elif mism + 2 < last < end:
+                            first = mism + 1
+                            mism = last
+                            last += 1
+                            initial = False
+                            continue
+                        # Do not keep checking for the same base
+                        break
+                        
+                    # For each identified SNR, break the for-loop so that if
+                    #  'base' was found in the first position of the SNR,
+                    #  'cBase' is not tested for in the same position again
+                    break
+            # Move over the frame for the new potential SNR
+            first = last
+        # Announce progress, if desired
+        if verbose:
+            print('{} - Looking for SNRs with 1 mismatch on reference "{}",' \
+                  ' finished @ bp {:,}.'.format(datetime.now(), ref, first))
+    
+    return SNRsByLenStrdRef
 
 
 def howLongSince(t_start):

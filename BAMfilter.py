@@ -71,8 +71,7 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
         for refName, eachTransStart in eachTransStartByRef.items():
             print('{} - Identifying the reads to be removed on reference {}' \
-                  '{}...'.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                                 refName, '+' if strd else '-'))
+                  '{}...'.format(datetime.now(), refName, '+' if strd else '-'))
             refLen = bam.get_reference_length(refName)
             # Flatten all the expressed transcript starts on this strd/ref
             flatStarts = []
@@ -122,7 +121,7 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     #             (x.reference_id, x.reference_start, x.reference_length))
     
     print('{} - Writing the filtered BAM file, excluding {} reads...'.format(
-        datetime.now().strftime('%Y-%m-%d %H:%M:%S'), len(toRemove)))
+        datetime.now(), len(toRemove)))
     # Create the bamfile to add the reads
     filtBAM = pysam.AlignmentFile(out_bamfile, 'wb', template = bam)
     # Add the reads in order
@@ -138,8 +137,8 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     #     datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
     # pysam.index(filtBAM)
     
-    print('{} - A filtered bam file has been created.'.format(
-        datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+    print('{} - A filtered BAM file has been created.'.format(
+        datetime.now()))
         
     
         
