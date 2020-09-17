@@ -172,7 +172,7 @@ def getPieces(base, fasta, cpus, cFR):
     allPieces = []
     
     # Go over each record again and create the pieces by adding slices to them
-    with open(fasta, "r") as genome:
+    with open(fasta, 'r') as genome:
         # For each record, initiate the first slice to be between 0 & up to
         #  whatever length remains to be added to the piece
         for ch in SeqIO.parse(genome, 'fasta'):     
