@@ -126,7 +126,7 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
                         mapping = getOverlaps(read.get_blocks(), [(start, end)])
                         if mapping != []:
                             toRemove.add(read)
-    
+    bam.close()
     toRemoveN = len(toRemove)
     # Filter the cbFile, if any
     if cbFile and toRemoveN:
@@ -136,15 +136,17 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
                 'reads...')
     # Create the bamfile and add the reads not in the toRemove set
     nReads = 0
-    filtBAM = pysam.AlignmentFile(out_bamfile, 'wb', template = bam)
-    for read in bam:
+    
+    bamIN = pysam.AlignmentFile(bamfile, 'rb')
+    bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bam)
+    for read in bamIN.fetch(until_eof = True):
         if read not in toRemove:
             nReads += 1
-            filtBAM.write(read)
+            bamOUT.write(read)
     # Close the files
-    filtBAM.close()
-    bam.close()
-    logger.info('A filtered BAM file with {nReads} reads has been created.')
+    bamIN.close()
+    bamOUT.close()
+    logger.info(f'A filtered BAM file with {nReads} reads has been created.')
         
     
 def cbFileFilter(toRemove, cbFile, out_cbFile):
