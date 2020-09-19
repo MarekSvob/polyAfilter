@@ -8,11 +8,11 @@ Created on Wed Sep  9 09:11:28 2020
 import os
 import pysam
 import logging
-import collections
 
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
     sortSNRsByLenStrdRef
 from SNRanalysis import flattenIntervals, getOverlaps
+
 
 logging.basicConfig(level = logging.INFO,
                     format = '%(asctime)s - %(levelname)s: %(message)s')
@@ -24,9 +24,7 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
               cbFile = None, out_cbFile = None):
     """Function that filters a BAM file to remove non-canonical reads that
     likely resulted from poly(dT) priming onto genomically encoded polyA single
-    nucleotide repeats (SNRs), as opposed to mRNA polyA tails. Note that where
-    related, parts of this function's code were adapted from the scumi module
-    [https://bitbucket.org/jerry00/scumi-dev/src/master/].
+    nucleotide repeats (SNRs), as opposed to mRNA polyA tails.
 
     Parameters
     ----------
@@ -89,8 +87,8 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     # Go over each strand and ref separately
     for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
         for refName, eachTransStart in eachTransStartByRef.items():
-            logger.info(f'Identifying the reads to be removed on reference ' \
-                        '{refName}{"+" if strd else "-"}...')
+            logger.info('Identifying the reads to be removed on reference '
+                        f'{refName}{"+" if strd else "-"}...')
             refLen = bam.get_reference_length(refName)
             # Flatten all the expressed transcript starts on this strd/ref
             flatStarts = []
@@ -134,7 +132,7 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     if cbFile and toRemoveN:
         cbFileFilter(toRemove, cbFile, out_cbFile)
         
-    logger.info(f'Writing the filtered BAM file, excluding {toRemoveN:,d} ' \
+    logger.info(f'Writing the filtered BAM file, excluding {toRemoveN:,d} '
                 'reads...')
     # Create the bamfile and add the reads not in the toRemove set
     filtBAM = pysam.AlignmentFile(out_bamfile, 'wb', template = bam)
@@ -149,7 +147,9 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     
 def cbFileFilter(toRemove, cbFile, out_cbFile):
     """Function that subtracts the appropriate numbers from the CB counts,
-    including the T frequencies in UMIs.
+    including the T frequencies in UMIs. Note that where related, parts of this
+    function's code were adapted from the scumi module
+    [https://bitbucket.org/jerry00/scumi-dev/src/master/].
 
     Parameters
     ----------
@@ -171,6 +171,7 @@ def cbFileFilter(toRemove, cbFile, out_cbFile):
     import numpy as np
     import pandas as pd
     import regex as re
+    from collections import defaultdict
     from functools import partial
     from scumi import scumi as scu
     
@@ -197,7 +198,7 @@ def cbFileFilter(toRemove, cbFile, out_cbFile):
     
     # Initiate the counter of UMIs per cell, including T frequency
     cbDF = pd.read_csv(cbFile, sep = '\t', index_col = 0, header = 0)
-    cbCounter = collections.defaultdict(
+    cbCounter = defaultdict(
         partial(np.zeros, shape = cbDF.shape[1], dtype = np.uint32))
     
     for read in toRemove:
@@ -212,7 +213,12 @@ def cbFileFilter(toRemove, cbFile, out_cbFile):
     rmDF.index.name = cbDF.index.name
     rmDF.columns = cbDF.columns
     # Subtract the rmDF from the cbDF & save
-    diffDF = cbDF.subtract(rmDF, fill_value = 0).astype(np.uint32)
+    diffDF = cbDF.subtract(rmDF, fill_value = 0)
+    # Remove rows with 0 in cb_counts or with any negative numbers anywhere
+    diffDF = diffDF[diffDF['cb_count'] > 0]
+    diffDF = diffDF[(diffDF >= 0).all(1)].astype(np.uint32)
+    # Sort by cb_count & save
+    diffDF.sort_values(by = 'cb_count', ascending = False, inplace = True)
     if out_cbFile is None:
         out_cbFile = cbFile + '.filtered.tsv'
     diffDF.to_csv(out_cbFile, sep = '\t')
@@ -220,5 +226,5 @@ def cbFileFilter(toRemove, cbFile, out_cbFile):
     # Report the results
     nCells = rmDF.shape[0]
     nUMIs = sum(rmDF['cb_count'])
-    logger.info(f'{nUMIs:,d} reads across {nCells:,d} cells removed from ' \
+    logger.info(f'{nUMIs:,d} reads across {nCells:,d} cells removed from '
                 'the CB file.')

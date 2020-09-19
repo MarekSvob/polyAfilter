@@ -9,11 +9,17 @@ Created on Sat May 16 18:07:19 2020
 import os
 import collections
 import gffutils
+import logging
 import pandas as pd
 import numpy as np
 from Bio import SeqIO
 
 from SNRdetection import loadPKL, savePKL, getGenomeLength, compDict, capsDict
+
+
+logging.basicConfig(level = logging.INFO,
+                    format = '%(asctime)s - %(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
 # Default exclusivePairs
 pairs = [('gene', 'Intergenic'),
@@ -49,7 +55,7 @@ def getBaseComp(out_bases, fasta = None, showGC = True):
     # Otherwise, scan the genome to create it
     bases = collections.defaultdict(int)
 
-    print('Scanning the genome for base composition...')
+    logger.info('Scanning the genome for base composition...')
     # Make sure that the fasta file is open only temporarily
     with open(fasta, 'r') as genome:
         # Go over each base in each record in the genome and count each
@@ -63,8 +69,8 @@ def getBaseComp(out_bases, fasta = None, showGC = True):
         gc = bases['C'] + bases['c'] + bases['G'] + bases['g']
         sumKnownBases = bases['A'] + bases['a'] + bases['T'] + bases['t'] \
             + bases['C'] + bases['c'] + bases['G'] + bases['g']
-        print('Scanning finished, G/C content: {:.2%}'.format(
-            round(gc / sumKnownBases, 2)))
+        logger.info('Scanning finished, G/C content: '
+                    f'{round(gc / sumKnownBases, 2):.2%}.')
     
     return bases
 
@@ -110,13 +116,13 @@ def countsCheck(base, lengthToSNRcounts, lenToFeats, out_bases, fasta = None):
     featbases = sum([c*l for l,cs in lenToFeats.items() for c in cs.values()])
     
     if SNRbases == scanned == featbases:
-        print('The total number of {}/{} bases ({:,}) '\
-              'checks out across SNRs, feature sets, and genome!'.format(
-                  base, compDict[base], SNRbases))
+        logger.info(f'The total number of {base}/{compDict[base]} bases '
+                    f'({SNRbases:,d}) checks out across SNRs, feature sets, '
+                    'and genome!')
     else:
-        print('{}/{} bases in SNRs: {:,}; from genome scanning {:,}; '\
-              'from feature counting: {:,}'.format(
-                  base, compDict[base], SNRbases, scanned, featbases))
+        logger.info(f'{base}/{compDict[base]} bases in SNRs: {SNRbases:,d}; '
+                    f'from genome scanning {scanned:,d}; '
+                    f'from feature counting: {featbases:,d}.')
 
 
 def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
@@ -329,13 +335,12 @@ def flattenIntervals(intervals):
     currentStart, currentEnd = intervals[0]
     # Make sure that this is indeed a valid interval
     if currentStart >= currentEnd:
-        raise Exception("Interval's start [{}] >= end [{}]!".format(
-            currentStart, currentEnd))
+        raise Exception(f"Interval's start [{currentStart}] >= end "
+                        f"[{currentEnd}]!")
     for iStart, iEnd in intervals[1:]:
         # Make sure that this is indeed a valid interval
         if iStart >= iEnd:
-            raise Exception("Interval's start [{}] >= end [{}]!".format(iStart,
-                                                                        iEnd))
+            raise Exception(f"Interval's start [{iStart}] >= end [{iEnd}]!")
         # If the new interval overlaps the existing, merge by updating the end.
         # Note that when iStart = currentEnd, this is technically an adjacency
         #  (not overlap) but even then a merge is desirable, nevertheless.
@@ -543,9 +548,8 @@ def nonOverlapCheck(intervals):
     oldEnd = 0
     for newStart, newEnd in intervals:
         if newStart < oldEnd:
-            raise Exception('The intervals overlap! [newStart = {}, newEnd ' \
-                            '= {}, oldEnd = {}]'.format(newStart, newEnd,
-                                                        oldEnd))
+            raise Exception(f'The intervals overlap! [newStart = {newStart}, '
+                            f'newEnd = {newEnd}, oldEnd = {oldEnd}]')
         # Note that if newStart == oldEnd, they are adjacent
         else:
             oldEnd = newEnd
@@ -591,7 +595,7 @@ def getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db, featsOfInterest):
     # Go over each strand separately
     for featType in featsOfInterest:
         for strd in (True, False):
-            print('Flattening {}{}s'.format('+' if strd else '-', featType))
+            logger.info(f'Flattening {"+" if strd else "-"}{featType}s...')
             featsByRef = collections.defaultdict(list)
             # Iterate through ALL features of this type, for each strand.
             for feat in db_conn.all_features(featuretype = featType,

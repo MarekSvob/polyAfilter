@@ -13,11 +13,15 @@ import dill
 import gffutils
 import tempfile
 import shutil
+import logging
 from Bio import SeqIO
 from multiprocessing import Pool
 from random import randint
-from datetime import datetime
 
+
+logging.basicConfig(level = logging.INFO,
+                    format = '%(asctime)s - %(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
 
 # Global result, tracking, and help variables to be initiated
 resSNRs = collections.defaultdict(list)
@@ -96,7 +100,7 @@ def getGenomeLength(fasta):
     
     # Check if the fasta in question has already been measured
     if genomeLengths[fasta] == 0:
-        print('Measuring the size of the genome...')
+        logger.info('Measuring the size of the genome...')
         # Initiate the genome length to be measured
         genLen = 0
         # Keep genome open only as long as necessary, while going over each
@@ -105,8 +109,7 @@ def getGenomeLength(fasta):
             for ch in SeqIO.parse(genome, 'fasta'):
                 genLen += len(ch.seq)
         genomeLengths[fasta] = genLen
-        print('The total genome length is {:,} '\
-              'bp.'.format(genomeLengths[fasta]))
+        logger.info(f'The total genome length is {genLen:,d} bp.')
     
     return genomeLengths[fasta]
 
@@ -164,7 +167,8 @@ def getPieces(base, fasta, cpus, cFR):
     # Initiate the range of piece sizes as a reusable tuple (which is a range
     #  of pre-set franctions of the genome divided by the # of cpus) & announce
     ran = (genLen//(cFR[0]*cpus), genLen//(cFR[1]*cpus))
-    print('Each piece will contain between {:,} and {:,} bp...'.format(*ran))
+    logger.info('Each piece will contain between '
+                f'{ran[0]:,d} and {ran[1]:,d} bp...')
     # Initiate the parameters for the first piece & the master list itself
     unit = randint(*ran)    
     piece = []
@@ -201,8 +205,7 @@ def getPieces(base, fasta, cpus, cFR):
     # Save the total number of pieces to the respective global variable
     totalPieces = len(allPieces)
     # Sort the pieces in place by their total length, largest to smallest
-    print('Sorting {:,} pieces by the total number of '\
-          'bp...'.format(totalPieces))
+    logger.info(f'Sorting {totalPieces:,} pieces by the total number of bp...')
     allPieces.sort(key = lambda x: sum([len(i[2]) for i in x]), reverse = True)
     
     return allPieces
@@ -389,8 +392,8 @@ def findSNRsWMism(base, piece, minSNRlen = 5, verbose = False,
         bp0 = s[1]
         # Announce progress, if desired
         if verbose:
-            print('{} - Looking for SNRs with 1 mismatch on reference "{}",' \
-                  ' starting @ bp {:,}...'.format(datetime.now(), ref, bp0))
+            logger.info('Looking for SNRs with 1 mismatch on reference'
+                        f' "{ref}", starting @ bp {bp0:,d}...')
         # Save the sequence to scan & initialize trackers
         refseq = s[2]
         first = 0
@@ -480,8 +483,8 @@ def findSNRsWMism(base, piece, minSNRlen = 5, verbose = False,
             first = last
         # Announce progress, if desired
         if verbose:
-            print('{} - Looking for SNRs with 1 mismatch on reference "{}",' \
-                  ' finished @ bp {:,}.'.format(datetime.now(), ref, first))
+            logger.info('Search for SNRs with 1 mismatch on reference'
+                        f' "{ref}" finished @ bp {first:,d}.')
     
     return SNRsByLenStrdRef
 
@@ -502,8 +505,8 @@ def howLongSince(t_start):
     # Save how much has elapsed (in seconds)
     t_diff = time.time() - t_start
     
-    print("{}h:{}m:{}s elapsed".format(
-        int(t_diff//(60*60)), int((t_diff%(60*60))//60), int(t_diff%60)))
+    logger.info(f'{t_diff//(60*60):d}h:{(t_diff%(60*60))//60:d}m:'
+                f'{t_diff%60:d}s elapsed.')
 
 
 def collectResult(result):
@@ -539,12 +542,10 @@ def collectResult(result):
     # Announce progress
     t_since = time.time() - timeStart
     t_left = t_since/processed * (totalPieces - processed)
-    print('Processed {:,} / {:,} ({:.2%}) splits in {}h:{}m:{}s. Time '\
-          'remaining: ~{}h:{}m:{}s'.format(
-              processed, totalPieces, processed / totalPieces,
-              int(t_since//(60*60)), int((t_since%(60*60))//60),
-              int(t_since%60), int(t_left//(60*60)), int((t_left%(60*60))//60),
-              int(t_left%60)))
+    logger.info(f'Processed {processed:,d} / {totalPieces:,d} ('
+                f'{processed/totalPieces:.2%}) splits in {t_since//(60*60):d}h'
+                f':{(t_since%(60*60))//60:d}m:{t_since%60}s. Time remaining: ~'
+                f'{t_left//(60*60)}h:{(t_left%(60*60))//60}m:{t_left%60}s.')
     
     
 def saveSNRcsv(loc, lengthToSNRcounts):
@@ -566,7 +567,7 @@ def saveSNRcsv(loc, lengthToSNRcounts):
         for key in sorted(lengthToSNRcounts.keys()):
             f.write('{},{}\n'.format(key, lengthToSNRcounts[key]))
     
-    print('SNR counts saved to {}'.format(loc))
+    logger.info(f'SNR counts saved to {loc}.')
          
     
 def savePKL(loc, var):
@@ -587,7 +588,7 @@ def savePKL(loc, var):
     with open(loc, 'wb') as f:
         dill.dump(var, f)
         
-    print('File saved to {}'.format(loc))
+    logger.info(f'File saved to {loc}.')
      
     
 def loadSNRcsv(loc):
@@ -610,7 +611,7 @@ def loadSNRcsv(loc):
         for line in f:
             k,v = line.rstrip('\n').split(',')
             lengthToSNRcounts[int(k)] = int(v)
-    print('SNR counts loaded from {}'.format(loc))
+    logger.info(f'SNR counts loaded from {loc}.')
             
     return lengthToSNRcounts
     
@@ -632,7 +633,7 @@ def loadPKL(loc):
     
     with open(loc, 'rb') as f:
         var = dill.load(f)
-    print('File loaded from {}'.format(loc))
+    logger.info(f'File loaded from {loc}.')
     
     return var
 
@@ -707,19 +708,19 @@ def getSNRs(base, fasta, gff, out_db, out_snrs, out_csv, out_concf, out_discf,
     
     # Otherwise create it by processing
     # Create a database from the gff if it does not exist yet
-    print('Checking for a database...')
+    logger.info('Checking for a database...')
     if not os.path.isfile(out_db):
-        print('None had been created - creating a new database...')
+        logger.info('None had been created - creating a new database...')
         gffutils.create_db(gff, dbfn = out_db, force = True,
                            merge_strategy = 'create_unique', verbose = True)
         # Note that not specifying id_spec makes the db creation much slower
         #  (up to 5 hrs instead of ~20 min) but enables proper functioning of
         #  gffutils.FeatureDB.children(), as discussed here:
         #  https://github.com/daler/gffutils/issues/158
-    print('The database is ready.')
+    logger.info('The database is ready.')
     # Create the list of pieces to be processed in parallel
     allPieces = getPieces(base, fasta, cpus, cFR)
-    print('Looking for SNRs across {} parallel processes...'.format(cpus))
+    logger.info(f'Looking for SNRs across {cpus} parallel processes...')
     # Start measuring time
     timeStart = time.time()
     # Create a pool of workers with given the # of processes & max tasks
