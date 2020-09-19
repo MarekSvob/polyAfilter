@@ -138,7 +138,7 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     nReads = 0
     
     bamIN = pysam.AlignmentFile(bamfile, 'rb')
-    bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bam)
+    bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bamIN)
     for read in bamIN.fetch(until_eof = True):
         if read not in toRemove:
             nReads += 1
