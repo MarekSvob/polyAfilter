@@ -135,14 +135,16 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     logger.info(f'Writing the filtered BAM file, excluding {toRemoveN:,d} '
                 'reads...')
     # Create the bamfile and add the reads not in the toRemove set
+    nReads = 0
     filtBAM = pysam.AlignmentFile(out_bamfile, 'wb', template = bam)
-    for read in bam.fetch(until_eof = True):
+    for read in bam:
         if read not in toRemove:
+            nReads += 1
             filtBAM.write(read)
     # Close the files
     filtBAM.close()
     bam.close()
-    logger.info('A filtered BAM file has been created.')
+    logger.info('A filtered BAM file with {nReads} reads has been created.')
         
     
 def cbFileFilter(toRemove, cbFile, out_cbFile):
@@ -226,5 +228,5 @@ def cbFileFilter(toRemove, cbFile, out_cbFile):
     # Report the results
     nCells = rmDF.shape[0]
     nUMIs = sum(rmDF['cb_count'])
-    logger.info(f'{nUMIs:,d} reads across {nCells:,d} cells removed from '
-                'the CB file.')
+    logger.info(f'{nUMIs:,d} reads across {nCells:,d} cell barcodes '
+                'removed from the CB file.')
