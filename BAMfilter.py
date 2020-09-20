@@ -136,17 +136,20 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
                 'reads...')
     # Create the bamfile and add the reads not in the toRemove set
     nReads = 0
+    nAll = 0
     
     bamIN = pysam.AlignmentFile(bamfile, 'rb')
     bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bamIN)
     for read in bamIN.fetch(until_eof = True):
+        nAll += 1
         if read not in toRemove:
             nReads += 1
             bamOUT.write(read)
     # Close the files
     bamIN.close()
     bamOUT.close()
-    logger.info(f'A filtered BAM file with {nReads} reads has been created.')
+    logger.info(f'A filtered BAM file with {nReads:,d} reads out of {nAll:,d} '
+                'total has been created.')
         
     
 def cbFileFilter(toRemove, cbFile, out_cbFile):
