@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData, 
               out_db, out_bamfile = None, tROC = {}, includeIntrons = False,
-              cbFile = None, out_cbFile = None):
+              cbFile = None, out_cbFile = None, verbose = False):
     """Function that filters a BAM file to remove non-canonical reads that
     likely resulted from poly(dT) priming onto genomically encoded polyA single
     nucleotide repeats (SNRs), as opposed to mRNA polyA tails.
@@ -55,6 +55,8 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     out_cbFile : (str), optional
         Location of a new scumi cell barcode count file, if any. If None, the
         cbFile name is used with '.filtered.tsv' appended. The default is None.
+    verbose : (bool)
+        Indicates whether extra messages are logged. The default is False.
 
     Returns
     -------
@@ -66,8 +68,11 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
         out_bamfile = bamfile + '.filtered.bam'
     # If the BAM file already exists, do not overwrite
     if os.path.isfile(out_bamfile):
-        logger.info('The filtered BAM file already exists.')
+        logger.info('The filtered BAM file "{out_bamfile}" already exists.')
         return
+    
+    logger.info(f'Identifying reads mapped to {covLen:,d} bp upstream of '
+                f'non-terminal SNR{minSNRlen:,d}+ to be removed...')
     # Get transcript starts if N/A for this specific length
     if covLen not in tROC:
         BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
@@ -87,8 +92,9 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     # Go over each strand and ref separately
     for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
         for refName, eachTransStart in eachTransStartByRef.items():
-            logger.info('Identifying the reads to be removed on reference '
-                        f'{refName}{"+" if strd else "-"}...')
+            if verbose:
+                logger.info('Identifying reads to be removed on reference '
+                            f'{refName}{"+" if strd else "-"}...')
             refLen = bam.get_reference_length(refName)
             # Flatten all the expressed transcript starts on this strd/ref
             flatStarts = []
@@ -130,10 +136,11 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     toRemoveN = len(toRemove)
     # Filter the cbFile, if any
     if cbFile and toRemoveN:
-        cbFileFilter(toRemove, cbFile, out_cbFile)
-        
-    logger.info(f'Writing the filtered BAM file, excluding {toRemoveN:,d} '
-                'reads...')
+        cbFileFilter(toRemove, cbFile, out_cbFile, verbose)
+    
+    if verbose:
+        logger.info(f'Writing the filtered BAM file, excluding {toRemoveN:,d} '
+                    'reads...')
     # Create the bamfile and add the reads not in the toRemove set
     nReads = 0
     nAll = 0
@@ -148,11 +155,12 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     # Close the files
     bamIN.close()
     bamOUT.close()
-    logger.info(f'A filtered BAM file with {nReads:,d} reads out of {nAll:,d} '
-                'total has been created.')
+    logger.info(f'A filtered BAM file with {nReads:,d}/{nAll:,d} reads has '
+                f'been created. [Excluded reads {covLen:,d} bp upstream of '
+                f'non-terminal SNR{minSNRlen:,d}+.]')
         
     
-def cbFileFilter(toRemove, cbFile, out_cbFile):
+def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
     """Function that subtracts the appropriate numbers from the CB counts,
     including the T frequencies in UMIs. Note that where related, parts of this
     function's code were adapted from the scumi module
@@ -167,13 +175,16 @@ def cbFileFilter(toRemove, cbFile, out_cbFile):
     out_cbFile : (str), optional
         Location of a new cell barcode count file. If None, the cbFile name
         is used with '.filtered.tsv' appended.
+    verbose : (bool)
+        Indicates whether extra messages are logged.
 
     Returns
     -------
     None.
     """
     
-    logger.info('Counting UMIs per cell to be removed from the CB file...')
+    if verbose:
+        logger.info('Counting UMIs per cell to be removed from the CB file...')
     # Import the modules that are only necessary if a cbFile was provided
     import numpy as np
     import pandas as pd
@@ -233,5 +244,6 @@ def cbFileFilter(toRemove, cbFile, out_cbFile):
     # Report the results
     nCells = rmDF.shape[0]
     nUMIs = sum(rmDF['cb_count'])
-    logger.info(f'{nUMIs:,d} reads across {nCells:,d} cell barcodes '
-                'removed from the CB file.')
+    if verbose:
+        logger.info(f'{nUMIs:,d} reads across {nCells:,d} cell barcodes '
+                    'removed from the CB file.')
