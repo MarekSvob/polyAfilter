@@ -32,7 +32,7 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
         { SNR length : [ SNR ] }
     covLen : (int)
         The assumed distance between the priming event and read coverage.
-    minSNRlen : (int)
+    minSNRlen : (int, None)
         The shortest SNR length to consider. If None, remove all non-end
         coverage.
     bamfile : (str)
@@ -41,7 +41,7 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
         Path to the saved baseline data, if done before.
     out_db : (str)
         Path to the saved GTF/GFF database.
-    out_bamfile : (str)
+    out_bamfile : (str, None)
         Location of the resulting filtered bamfile. If None, the name of the
         input bamfile name is used with '.filtered.bam' appended. The default
         is None.
@@ -49,10 +49,10 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
         { endLen : ( Sensitivity, Specificity, Accuracy ) }. The default is {}.
     includeIntrons : (bool), optional
         Indicates whether to consider intron coverage. The default is False.
-    cbFile : (str), optional
+    cbFile : (str, None), optional
         Location of the scumi cell barcode count file, if any. The default is
         None.
-    out_cbFile : (str), optional
+    out_cbFile : (str, None), optional
         Location of a new scumi cell barcode count file, if any. If None, the
         cbFile name is used with '.filtered.tsv' appended. The default is None.
     verbose : (bool)
@@ -68,11 +68,9 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
         out_bamfile = bamfile + '.filtered.bam'
     # If the BAM file already exists, do not overwrite
     if os.path.isfile(out_bamfile):
-        logger.info('The filtered BAM file "{out_bamfile}" already exists.')
+        logger.info(f'The filtered BAM file "{out_bamfile}" already exists.')
         return
     
-    logger.info(f'Identifying reads mapped to {covLen:,d} bp upstream of '
-                f'non-terminal SNR{minSNRlen:,d}+ to be removed...')
     # Get transcript starts if N/A for this specific length
     if covLen not in tROC:
         BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
@@ -88,6 +86,9 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     toRemove = set()
     # Connect to the bam file
     bam = pysam.AlignmentFile(bamfile, 'rb')
+    
+    logger.info(f'Identifying reads mapped to {covLen:,d} bp upstream of '
+                f'non-terminal SNR{minSNRlen}+ to be removed...')
     
     # Go over each strand and ref separately
     for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
@@ -157,7 +158,7 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     bamOUT.close()
     logger.info(f'A filtered BAM file with {nReads:,d}/{nAll:,d} reads has '
                 f'been created. [Excluded reads {covLen:,d} bp upstream of '
-                f'non-terminal SNR{minSNRlen:,d}+.]')
+                f'non-terminal SNR{minSNRlen}+.]')
         
     
 def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
