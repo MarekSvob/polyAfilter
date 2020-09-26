@@ -139,9 +139,8 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     if cbFile and toRemoveN:
         cbFileFilter(toRemove, cbFile, out_cbFile, verbose)
     
-    if verbose:
-        logger.info(f'Writing the filtered BAM file, excluding {toRemoveN:,d} '
-                    'reads...')
+    logger.info(f'Writing the filtered BAM file, excluding {toRemoveN:,d} '
+                'reads...')
     # Create the bamfile and add the reads not in the toRemove set
     nReads = 0
     nAll = 0

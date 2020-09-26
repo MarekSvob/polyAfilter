@@ -726,6 +726,7 @@ def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons):
                 Pos += np.sum(pieceCov)
                 Neg += np.count_nonzero(pieceCov == 0)
     
+    bam.close()
     savePKL(out_transBaselineData, (covTransByStrdRef, Pos, Neg))
     
     return covTransByStrdRef, Pos, Neg
