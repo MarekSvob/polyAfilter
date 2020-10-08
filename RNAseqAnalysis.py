@@ -855,10 +855,6 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     eachTransStartByStrdRef : (dict)
         { strd : { refName : [ ( (start, end), ... ) ] } } for start exon
         pieces for each covered transcript.
-    FN : (int)
-        The total RNA-seq coverage in exon-wise transcript starts.
-    TN : (int)
-        The number of BPs with no coverage in exon-wise transcript starts.
     """
     # Notes:
     #
@@ -997,7 +993,7 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     Returns
     -------
     tROC : (dict)
-        { endLen : ( Sensitivity, Specificity, Accuracy ) }
+        { endLen : ( Sensitivity, Specificity, eachTransStartByStrdRef ) }
     """
     
     # If the file already exists, simply load
@@ -1102,23 +1098,26 @@ def sortSNRsByLenStrdRef(lenToSNRs):
     return SNRsByLenStrdRef
 
 
-def getSNRcovByTrans(lenToSNRs, tROC, out_snrROC, bamfile, product = False):
+def getSNRcovByTrans(SNRsByLenStrdRef, tROC, out_snrROC, bamfile,
+                     product = False, sortedSNRs = True):
     """This function gets Sensitivity & Specificity of coverage accounted for
     by SNRs in expressed transcript starts (defined by the tROC), in which they
     occur.
     
     Parameters
     ----------
-    lenToSNRs : (dict)
-        { SNR length : [ SNR ] }
+    SNRsByLenStrdRef : (dict)
+        { length : { strd : { ref : [ SNRs ] } } }
     tROC : (dict)
-        { endLen : ( Sensitivity, Specificity, Accuracy ) }
+        { endLen : ( Sensitivity, Specificity, eachTransStartByStrdRef ) }
     out_snrROC : (str)
         Location of this function's saved output.
     bamfile : (str)
         Location of the bamfile to be scanned.
     product : (bool)
         Whether the product or J statistic is optimized. The default is False.
+    sortedSNRs : (bool)
+        Indicates whether the SNRs are already sorted by length, strd, and ref
         
     Returns
     -------
@@ -1131,8 +1130,9 @@ def getSNRcovByTrans(lenToSNRs, tROC, out_snrROC, bamfile, product = False):
         snrROC = loadPKL(out_snrROC)
         return snrROC
     
-    # Sort SNRs by len, strd & ref        
-    SNRsByLenStrdRef = sortSNRsByLenStrdRef(lenToSNRs)
+    # Sort SNRs by len, strd & ref     
+    if not sortedSNRs:
+        SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)
     
     # Derive the best transcript end length, which is also the SNR coverage len
     covLen = max(tROC, key = lambda l: (tROC[l][0] * tROC[l][1] if product
@@ -1160,7 +1160,7 @@ def getSNRcovByTrans(lenToSNRs, tROC, out_snrROC, bamfile, product = False):
     # Load the bamfile
     bam = pysam.AlignmentFile(bamfile, 'rb')
     # Go over SNRs by length, from longest to shortest
-    for length in sorted(lenToSNRs, reverse = True):
+    for length in sorted(SNRsByLenStrdRef, reverse = True):
         logger.info('Getting Sensitivity & Specificity for SNRs of length'
                     f' {length}...')
         # For each length, go over each strd & ref of trans starts

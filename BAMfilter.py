@@ -128,12 +128,13 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
                     # Make sure the read is on the correct strand before adding
                     if read.is_reverse != strd:
                         # Make sure that reads filtered do indeed map onto the
-                        #  area identified, not just overlap it with thir
+                        #  area identified, not just overlap it with their
                         #  start-end range (in case of splicing)
                         mapping = getOverlaps(read.get_blocks(), [(start, end)])
                         if mapping != []:
                             toRemove.add(read)
     bam.close()
+    
     toRemoveN = len(toRemove)
     # Filter the cbFile, if any
     if cbFile and toRemoveN:
