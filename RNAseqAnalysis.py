@@ -957,15 +957,15 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
 
 
 def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
-                   endLenMin, endLenMax, tROC = {}, product = False,
-                   includeIntrons = False):
+                   endLenLo, endLenHi, tROC = {}, product = False,
+                   includeIntrons = False, endLenMax = 1000):
     """A gradient descent-like wrapper funciton around getTransEndSensSpec() to
     manage result generation & collection. This function maximizes Youden's J
-    statistic (Sensitivity + Specificity - 1) across exon-wise transcript
-    endLengths. This function assumes that there is only one such local
-    maximum. (!) Also note that while endLenMin and endLenMax serve to initiate
-    the search, they are non-binding and this algorithm may look outside these
-    boundaries.
+    statistic (Sensitivity + Specificity - 1) by default, or product, across
+    exon-wise transcript endLengths. This function assumes that there is only
+    one such local maximum. (!) Also note that while endLenLo and endLenHi
+    serve to initiate the search, they are non-binding and this algorithm may
+    look outside these boundaries (up to ).
 
     Parameters
     ----------
@@ -977,9 +977,9 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
         Path to the saved GTF/GFF database.
     bamfile : (str)
         Path to the (filtered) bam file.
-    endLenMin : (int)
+    endLenLo : (int)
         The minimal estimated length of exon-wise transcript ends to consider.
-    endLenMax : (int)
+    endLenHi : (int)
         The maximum estimated length of exon-wise transcript ends to consider.
     tROC : (dict), optional
         { endLen : ( Sensitivity, Specificity, Accuracy ) }. The default is {}.
@@ -989,6 +989,8 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
         default is False.
     includeIntrons : (bool), optional
         Indicates whether to consider intron coverage. The default is False.
+    endLenMax : (int), optional
+        Indicates what is the maximum 
 
     Returns
     -------
@@ -1007,9 +1009,9 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     
     # Start with min, mid, and max and then apply the repetitive algorithm
     #  until 'covergence'
-    for endLen in (endLenMin,
-                   np.mean((endLenMin, endLenMax), dtype = int),
-                   endLenMax):
+    for endLen in (endLenLo,
+                   np.mean((endLenLo, endLenHi), dtype = int),
+                   endLenHi):
         if endLen not in tROC:
             tROC[endLen] = getTransEndSensSpec(endLen, bamfile, BLdata,
                                                includeIntrons)
@@ -1040,16 +1042,18 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
         else:
             checkedJustAboveBelow = [False, False]
             oldOptLen = optLen
-        # Get the index of the 
+        # Get the index of the optimal optLen
         i = checkedLens.index(optLen)
-        # Get the index of the adjacent endLen
+        # Get the index of an adjacent endLen
         j = i + (-1, 1)[lookAbove]
         
         # If the adjacent endLen does not exist in the given direction, look
         #  as far as an existing adjacent value in the opposite direction
-        if j in (-1, len(checkedLens)):
-            lenToC = optLen + (optLen
-                               - checkedLens[i + (-1, 1)[not lookAbove]])
+        # Also, limit the length to at most endLenMax
+        if j not in range(len(checkedLens)):
+            lenToC = min(
+                optLen + (optLen - checkedLens[i + (-1, 1)[not lookAbove]]),
+                endLenMax)
         # Otherwise just look between the optimal & adjacent endLen
         else:
             lenToC = np.mean((optLen, checkedLens[j]), dtype = int)
