@@ -1024,23 +1024,28 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     # Initiate the alternating indicator of looking above or below
     lookAbove = False
     # Initiate the indicators of having looked at both optLen+/-1
-    checkedJustAboveBelow = [False, False]
+    checkedJustBelowAbove = [False, False]
     # Initiate the oldOptLen at a value that can't be true before the 1st loop
     oldOptLen = -1
     # Run the while loop until both optLen+/-1 have been checked and neither
     #  is better than optLen ~ the optimum has been found with max resolution
-    while not all(checkedJustAboveBelow):
+    while not all(checkedJustBelowAbove):
         checkedLens = sorted(tROC)
         # Get the current most optimal endLen using the J statistic or product
         optLen = max(tROC, key = lambda l: (tROC[l][0] * tROC[l][1] if product
                                             else tROC[l][0] + tROC[l][1] - 1))
         logger.info(f'The current optimal end length is {optLen}.')
+        # Settings in the special case when the endLenMax is reached
+        if optLen == endLenMax:
+            lookAbove = False
+            checkedJustBelowAbove = [False, True]
+            oldOptLen = optLen
         # If the new opt is different from the old, reset the indicators & save
         #  the new "old"; otherwise just flip the direction to look further
-        if optLen == oldOptLen:
-            lookAbove = not lookAbove 
+        elif optLen == oldOptLen:
+            lookAbove = not lookAbove
         else:
-            checkedJustAboveBelow = [False, False]
+            checkedJustBelowAbove = [False, False]
             oldOptLen = optLen
         # Get the index of the optimal optLen
         i = checkedLens.index(optLen)
@@ -1059,14 +1064,14 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
             lenToC = np.mean((optLen, checkedLens[j]), dtype = int)
         
         # If this length has already been checked, this must be either optLen
-        #  itself (if lookAbove = True, which means that optLen+1 must have
+        #  itself (if lookAbove = True, which means that optLen + 1 must have
         #  been checked as well, as that must be the checkedLens[j])
         #  or optLen-1 (if lookAbove = False), so don't check it again & only
         #  mark that an immediately adjacent value has already been checked
         if lenToC in checkedLens:
             logger.info(f'End length of {(lenToC, checkedLens[j])[lookAbove]} '
                         'has already been checked.')
-            checkedJustAboveBelow[lookAbove] = True
+            checkedJustBelowAbove[lookAbove] = True
         else:
             tROC[lenToC] = getTransEndSensSpec(lenToC, bamfile, BLdata,
                                                includeIntrons)
