@@ -1161,11 +1161,20 @@ def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
     # Get the optimal length using the J statistic & announce
     optEndLen = max(tROC, key = lambda l: (tROC[l][0] * tROC[l][1] if product
                                            else tROC[l][0] + tROC[l][1] - 1))
-    logger.info(f'The optimal coverage distance length is {optEndLen}.'
+    logger.info(f'The optimal coverage distance length is {optEndLen}. '
                 'Getting ROC across SNR lengths...')
     # Extract the transROC data for this length
-    # Note: Flatten the to get transStarts
     eachTransStartByStrdRef = tROC[optEndLen][2]
+    # Flatten the to get transStartsByStrdRef
+    transStartsByStrdRef = collections.defaultdict(
+        lambda: collections.defaultdict(list))
+    for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
+        for refName, eachTransStarts in eachTransStartByRef.items():
+            # First, unpack the tuple of tuples; then flatten at once
+            transStarts = []
+            for eachTransStart in eachTransStarts:
+                transStarts.extend(eachTransStart)
+            transStartsByStrdRef[strd][refName] = flattenIntervals(transStarts)
     
     # The SNR length cutoff will describe the minimal SNR length included in
     #  non-canonical coverage. For SNRs at each length, flatten the SNRends and
@@ -1188,10 +1197,9 @@ def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
     for length in sorted(SNRsByLenStrdRef, reverse = True):
         print('Checking coverage for SNRs of length {}+...'.format(length))
         # Work by strand and reference
-        for strd, eachTransStartsByRef in eachTransStartByStrdRef.items():
-            for refName, eachTransStarts in eachTransStartsByRef.items():
+        for strd, transStartsByRef in transStartsByStrdRef.items():
+            for refName, transStarts in transStartsByRef.items():
                 refLen = bam.get_reference_length(refName)
-                transStarts = flattenIntervals(eachTransStarts)
                 newSNRpieces = []
                 # Get & flatten the SNRs' pieces at this length/strd/ref
                 for SNR in SNRsByLenStrdRef[length][strd][refName]:
