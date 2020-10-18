@@ -1195,7 +1195,7 @@ def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
     #  subsequent calculations. Always extract only the newly added pieces and
     #  add the coverage data (TP += FN; TN -= FP) to the already existing for speed.
     for length in sorted(SNRsByLenStrdRef, reverse = True):
-        print('Checking coverage for SNRs of length {}+...'.format(length))
+        logger.info(f'Checking coverage for SNRs of length {length}+...')
         # Work by strand and reference
         for strd, transStartsByRef in transStartsByStrdRef.items():
             for refName, transStarts in transStartsByRef.items():
@@ -1243,7 +1243,7 @@ def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
 
     bam.close()
     # Announce the optimal SNR length
-    print('The optimal SNR length is {}.'.format(max(
+    logger.info('The optimal SNR length is {}.'.format(max(
         snrROC, key = lambda l: (snrROC[l][0] * snrROC[l][1] if product
                                  else snrROC[l][0] + snrROC[l][1] - 1))))
     savePKL(out_SNREndROC, snrROC)
