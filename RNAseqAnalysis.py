@@ -827,7 +827,7 @@ def getTransStartEnding(exons, endLength, strd):
     
 def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
                         getSensSpec = True):
-    """Function to provide data for a ROC curve for various transcript end
+    """Function to provide data for a ROC curve across various transcript end
     lengths.
     
     Parameters
@@ -855,6 +855,12 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     eachTransStartByStrdRef : (dict)
         { strd : { refName : [ ( (start, end), ... ) ] } } for start exon
         pieces for each covered transcript.
+    TP : (int)
+        The true positive rate of RNAseq coverage (sum of coverage depth
+        across bps) of transcript starts.
+    TN : (int)
+        The true negative rate of RNAseq coverage (sum of bps with no coverage)
+        of transcript starts.
     """
     # Notes:
     #
@@ -953,7 +959,7 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     if not 0 <= specificity <= 1:
         raise Exception(f'Specificity is {specificity}.')
     
-    return sensitivity, specificity, eachTransStartByStrdRef
+    return sensitivity, specificity, eachTransStartByStrdRef, TP, TN
 
 
 def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
@@ -995,7 +1001,7 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     Returns
     -------
     tROC : (dict)
-        { endLen : ( Sensitivity, Specificity, eachTransStartByStrdRef ) }
+        { endLen : ( Sens, Spec, eachTransStartByStrdRef, TP, TN ) }
     """
     
     # If the file already exists, simply load
@@ -1107,18 +1113,148 @@ def sortSNRsByLenStrdRef(lenToSNRs):
     return SNRsByLenStrdRef
 
 
-def getSNRcovByTrans(SNRsByLenStrdRef, tROC, out_snrROC, bamfile,
-                     product = False, sortedSNRs = True):
-    """This function gets Sensitivity & Specificity of coverage accounted for
-    by SNRs in expressed transcript starts (defined by the tROC), in which they
-    occur.
+def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
+                 product = False, sortedSNRs = True):
+    """This alhorithm goes over ALL SNR lengths exactly once to determine the
+    sensitivity and specificity of coverage captured by the SNR pieces. This is
+    different from the transcript end algorithm, where there are many more
+    possibilities and info on one end length is relatively independent of the
+    others. In case of SNR lengths, we are interested in aggregating info about
+    all SNRs above some threshold, so it makes sense to scan all of them in
+    decreasing order exactly once. As an added benefit, the function *could*
+    also coverge/terminate as soon as J statistic starts decreasing, as only
+    one local maximum is assumed. (Not implemented.)
     
     Parameters
     ----------
     SNRsByLenStrdRef : (dict)
         { length : { strd : { ref : [ SNRs ] } } }
     tROC : (dict)
-        { endLen : ( Sensitivity, Specificity, eachTransStartByStrdRef ) }
+        { endLen : ( Sens, Spec, eachTransStartByStrdRef, TP, TN ) }
+    out_SNREndROC : (str)
+        Location where the output of this function should be stored.
+    bamfile : (str)
+        Location of the bamfile to be scanned.
+    product : (bool)
+        Whether the product or J statistic is optimized. The default is False.
+    sortedSNRs : (bool)
+        Indicates whether the SNRs are already sorted by length, strd, and ref.
+        The default is True.
+
+    Returns
+    -------
+    snrROC : (dict)
+        { SNR length : ( Sensitivity, Specificity ) }
+    """
+
+    # If the file already exists, simply load
+    if os.path.isfile(out_SNREndROC):
+        snrROC = loadPKL(out_SNREndROC)
+        return snrROC
+    
+    # Sort SNRs by len, strd & ref     
+    if not sortedSNRs:
+        SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)
+    
+    snrROC = {}
+
+    # Get the optimal length using the J statistic & announce
+    optEndLen = max(tROC, key = lambda l: (tROC[l][0] * tROC[l][1] if product
+                                           else tROC[l][0] + tROC[l][1] - 1))
+    logger.info(f'The optimal coverage distance length is {optEndLen}.'
+                'Getting ROC across SNR lengths...')
+    # Extract the transROC data for this length
+    # Note: Flatten the to get transStarts
+    eachTransStartByStrdRef = tROC[optEndLen][2]
+    
+    # The SNR length cutoff will describe the minimal SNR length included in
+    #  non-canonical coverage. For SNRs at each length, flatten the SNRends and
+    #  then find where they overlap with the transStarts & get the coverage
+    SNRpiecesByStrdRef = collections.defaultdict(
+        lambda: collections.defaultdict(list))
+    Pos = tROC[optEndLen][3]
+    Neg = tROC[optEndLen][4]
+    # Initiate the values to be adjusted for each SNR length (TP will be added
+    #  to and TN will be subtracted from - see below)
+    # "POSITIVE" ~ Inside exon-wise SNR pieces
+    TP = 0  # Total coveragee in exon-wise pieces
+    # "NEGATIVE" ~ Outside exon-wise SNR pieces
+    TN = Neg  # BPs with 0 coverage outside exon-wise pieces
+
+    bam = pysam.AlignmentFile(bamfile, 'rb')
+    # Start with the longest length whose data will be included in all
+    #  subsequent calculations. Always extract only the newly added pieces and
+    #  add the coverage data (TP += FN; TN -= FP) to the already existing for speed.
+    for length in sorted(SNRsByLenStrdRef, reverse = True):
+        print('Checking coverage for SNRs of length {}+...'.format(length))
+        # Work by strand and reference
+        for strd, eachTransStartsByRef in eachTransStartByStrdRef.items():
+            for refName, eachTransStarts in eachTransStartsByRef.items():
+                refLen = bam.get_reference_length(refName)
+                transStarts = flattenIntervals(eachTransStarts)
+                newSNRpieces = []
+                # Get & flatten the SNRs' pieces at this length/strd/ref
+                for SNR in SNRsByLenStrdRef[length][strd][refName]:
+                    if strd:
+                        start = max(0, SNR.start - optEndLen)
+                        end = SNR.start
+                    else:
+                        start = SNR.end
+                        end = min(refLen, SNR.end + optEndLen)
+                    newSNRpieces.append((start, end))
+                # Flatten the newSNRpieces
+                newSNRpieces = flattenIntervals(newSNRpieces)
+                # Retain only where these overlap with the transStarts
+                newSNRpieces = getOverlaps(newSNRpieces, transStarts)
+                # Remove already covered areas so only new ones are measured
+                newSNRpieces = removeOverlaps(
+                    newSNRpieces, SNRpiecesByStrdRef[strd][refName])                
+                # Measure the coverage of the new pieces only
+                for pStart, pEnd in newSNRpieces:
+                    pieceCov = np.sum(
+                        bam.count_coverage(contig = refName,
+                                           start = pStart,   # already 0-based
+                                           stop = pEnd,
+                                           quality_threshold = 0,
+                                           read_callback = lambda r:
+                                               r.is_reverse != strd),
+                        axis = 0)
+                    # Adjust the TP & TN accordingly
+                    TP += np.sum(pieceCov)
+                    TN -= np.count_nonzero(pieceCov == 0)
+                # Add the newSNRpieces to those from previous SNR lengths
+                SNRpiecesByStrdRef[strd][refName].extend(newSNRpieces)
+                # Flatten the SNRs (should contain no overlaps, only adjacency)
+                SNRpiecesByStrdRef[strd][refName] = flattenIntervals(
+                    SNRpiecesByStrdRef[strd][refName])
+        # Save the results
+        sensitivity = TP / Pos
+        specificity = TN / Neg
+
+        snrROC[length] = sensitivity, specificity
+
+    bam.close()
+    # Announce the optimal SNR length
+    print('The optimal SNR length is {}.'.format(max(
+        snrROC, key = lambda l: (snrROC[l][0] * snrROC[l][1] if product
+                                 else snrROC[l][0] + snrROC[l][1] - 1))))
+    savePKL(out_SNREndROC, snrROC)
+
+    return snrROC
+
+
+def getSNRcovByTrans(SNRsByLenStrdRef, tROC, out_snrROC, bamfile,
+                     product = False, sortedSNRs = True):
+    """This function gets Sensitivity & Specificity of coverage accounted for
+    by SNRs in expressed transcript starts (defined by the tROC), in which they
+    occur. This is an alternative to getSNREndROC().
+    
+    Parameters
+    ----------
+    SNRsByLenStrdRef : (dict)
+        { length : { strd : { ref : [ SNRs ] } } }
+    tROC : (dict)
+        { endLen : ( Sens, Spec, eachTransStartByStrdRef, TP, TN ) }
     out_snrROC : (str)
         Location of this function's saved output.
     bamfile : (str)
@@ -1126,7 +1262,8 @@ def getSNRcovByTrans(SNRsByLenStrdRef, tROC, out_snrROC, bamfile,
     product : (bool)
         Whether the product or J statistic is optimized. The default is False.
     sortedSNRs : (bool)
-        Indicates whether the SNRs are already sorted by length, strd, and ref
+        Indicates whether the SNRs are already sorted by length, strd, and ref.
+        The default is True.
         
     Returns
     -------
@@ -1146,6 +1283,8 @@ def getSNRcovByTrans(SNRsByLenStrdRef, tROC, out_snrROC, bamfile,
     # Derive the best transcript end length, which is also the SNR coverage len
     covLen = max(tROC, key = lambda l: (tROC[l][0] * tROC[l][1] if product
                                         else tROC[l][0] + tROC[l][1] - 1))
+    logger.info(f'The optimal coverage distance length is {covLen}.'
+                'Getting ROC across SNR lengths...')
     # Extract the relevant transcripts starts
     eachTransStartByStrdRef = tROC[covLen][2]
     
