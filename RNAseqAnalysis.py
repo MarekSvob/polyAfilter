@@ -608,7 +608,7 @@ def getNonCanCovGenes(out_NonCanCovGenes, lenToSNRs, out_db, bamfile,
 
 
 def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons):
-    """Function to obtain the baseline reference data (Transcripts, exons, and
+    """Function to obtain the baseline reference data (covered transcripts and
     total TP/TN) as an input for laster calculations of sensitivity &
     specificity at each given end length. Note that here, only expressed (i.e.,
     with any coverage) transcripts are considered.
@@ -685,7 +685,7 @@ def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons):
                         continue
                     # Add this covered transcript in the ref-wide piece list
                     covPieces.append((trans0start, trans0end))
-                # Extract exons from the transcript, last-to-first
+                # Extract exons from the transcript, last-to-first; 0-based
                 exons = sorted([(e.start - 1, e.end) for e
                                 in db.children(trans, featuretype = 'exon')],
                                reverse = strd)
@@ -855,12 +855,12 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     eachTransStartByStrdRef : (dict)
         { strd : { refName : [ ( (start, end), ... ) ] } } for start exon
         pieces for each covered transcript.
-    TP : (int)
-        The true positive rate of RNAseq coverage (sum of coverage depth
-        across bps) of transcript starts.
+    FN : (int)
+        The false negative rate of RNAseq coverage (sum of coverage depth
+        across bps) of transcript starts. [Pos baseline for transStarts.]
     TN : (int)
         The true negative rate of RNAseq coverage (sum of bps with no coverage)
-        of transcript starts.
+        of transcript starts. [Neg baseline for transStarts.]
     """
     # Notes:
     #
@@ -952,6 +952,7 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     bam.close()
     # Calculate the results
     TN = Neg - FP
+    FN = Pos - TP
     sensitivity = TP / Pos
     specificity = TN / Neg
     if not 0 <= sensitivity <= 1:
@@ -959,7 +960,7 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     if not 0 <= specificity <= 1:
         raise Exception(f'Specificity is {specificity}.')
     
-    return sensitivity, specificity, eachTransStartByStrdRef, TP, TN
+    return sensitivity, specificity, eachTransStartByStrdRef, FN, TN
 
 
 def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
@@ -971,7 +972,7 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     exon-wise transcript endLengths. This function assumes that there is only
     one such local maximum. (!) Also note that while endLenLo and endLenHi
     serve to initiate the search, they are non-binding and this algorithm may
-    look outside these boundaries (up to ).
+    look outside these boundaries (up to endLenMax).
 
     Parameters
     ----------
@@ -1001,7 +1002,7 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     Returns
     -------
     tROC : (dict)
-        { endLen : ( Sens, Spec, eachTransStartByStrdRef, TP, TN ) }
+        { endLen : ( Sens, Spec, eachTransStartByStrdRef, FN, TN ) }
     """
     
     # If the file already exists, simply load
