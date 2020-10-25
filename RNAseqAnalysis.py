@@ -935,6 +935,8 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
                         Tran.exons, endLength, strd)
                 # Add the flattened ends and starts (if any) to the resp lists
                 allTransEndPieces.extend(transEndPieces)
+                
+            ##### NOTE: NEED TO REMOVE OVERLAPS WITH FLATTENED TRANS ENDS #####
                 if transStartPieces != []:
                     eachTransStartByStrdRef[strd][refname].append(
                         tuple(transStartPieces))

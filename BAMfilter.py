@@ -80,7 +80,7 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
         tROC[covLen] = getTransEndSensSpec(covLen, bamfile, BLdata,
                                            includeIntrons, getSensSpec = False)    
     # Extract the transcript starts for this coverage length
-    eachTransStartByStrdRef = tROC[covLen][2]
+    eachTransStartByStrdRef = tROC[covLen][4]
     # If relevant, pre-sort SNRs by len, strd & ref    
     if minSNRlen is not None:
         SNRsByLenStrdRef = sortSNRsByLenStrdRef(lenToSNRs)
