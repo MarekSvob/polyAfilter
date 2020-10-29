@@ -908,8 +908,9 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     # Go over each strand and reference separately
     for strd, covTransByRef in covTransByStrdRef.items():
         for refname, trans in covTransByRef.items():
-            # Initiate the flattened (exon-wise) transcript end pieces for this
-            #  reference
+            # Initiate the flattened (exon-wise) transcript start/end pieces
+            #  for this reference
+            eachTransStart = []
             allTransEndPieces = []
             # Iterate through covered transcripts to extract start & end pieces
             #  of given length for each
@@ -935,13 +936,14 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
                         Tran.exons, endLength, strd)
                 # Add the flattened ends and starts (if any) to the resp lists
                 allTransEndPieces.extend(transEndPieces)
-                
-            ##### NOTE: NEED TO REMOVE OVERLAPS WITH FLATTENED TRANS ENDS #####
                 if transStartPieces != []:
-                    eachTransStartByStrdRef[strd][refname].append(
-                        tuple(transStartPieces))
+                    eachTransStart.append(tuple(transStartPieces))
             # Flatten the allTransEndPieces
             allTransEndPieces = flattenIntervals(allTransEndPieces)
+            # Remove any overlaps of the starts with the ends
+            for transStart in eachTransStart:
+                eachTransStartByStrdRef[strd][refname].append(
+                    tuple(removeOverlaps(list(transStart), allTransEndPieces)))
             # For each reference (on each strand), extract and add the exon
             #  coverage and non-covBP for the end pieces
             if getSensSpec:

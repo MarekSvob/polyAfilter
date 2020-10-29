@@ -37,7 +37,7 @@ timeStart = None
 avoidSplits = {'A':('a', 'A', 't', 'T'),
                'T':('a', 'A', 't', 'T'),
                'C':('c', 'C', 'g', 'G'),
-               'G':('c', 'C', 'g', 'G'),}
+               'G':('c', 'C', 'g', 'G')}
 
 # Dict of complementary bases
 compDict = {'A':'T', 'T':'A', 'C':'G', 'G':'C', 'N':'N'}
