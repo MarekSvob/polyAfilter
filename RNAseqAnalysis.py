@@ -1013,10 +1013,14 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
         { endLen : ( TP, FN, TN, FP, eachTransStartByStrdRef ) }
     """
     
-    # If the file already exists, simply load
+    # If the file already exists, simply load if it contains the final optLen
     if os.path.isfile(out_TransEndROC):
         tROC = loadPKL(out_TransEndROC)
-        return tROC
+        optLen = max(tROC, key = switch[optMeth])
+        if (optLen-1) in tROC ((optLen+1) in tROC or optLen == endLenMax):
+            logger.info(f'The file {out_TransEndROC} already exists with the '
+                        f'optimal end length by {optMeth} being {optLen}.')
+            return tROC
     
     # Get the baseline data
     BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
@@ -1048,7 +1052,7 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
         checkedLens = sorted(tROC)
         # Get the current most optimal endLen using the J statistic or product
         optLen = max(tROC, key = switch[optMeth])
-        logger.info(f'The current optimal end length is {optLen}.')
+        logger.info(f'The current optimal end length by {optMeth} is {optLen}.')
         # Settings in the special case when the endLenMax is reached
         if optLen == endLenMax:
             lookAbove = False
