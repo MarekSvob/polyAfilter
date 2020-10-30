@@ -974,7 +974,8 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
 def maxKey(key, d, meth):
     """A helper function for finding a maximum ROC point according to the
     specified optimizing function. In practice, used as a partial function with
-    'key' as arg.
+    'key' as the missing arg. Methods (other than 'product') taken from Berrar,
+    2019 (DOI: 10.1016/B978-0-12-809633-8.20351-8).
     
     Parameters
     ----------
@@ -990,11 +991,11 @@ def maxKey(key, d, meth):
     val : (float)
         The value assigned to this dict key based on the method used.
     """
-    switch = {'Youden': lambda x: x[0]/(x[0]+x[1]) + x[2]/(x[2]+x[3]) - 1,
-              'product': lambda x: x[0]/(x[0]+x[1]) * x[2]/(x[2]+x[3]),
-              'MCC': lambda x: (x[0]*x[2] - x[1]*x[3])/np.sqrt(
-                  (x[0]+x[1]) * (x[0]+x[3]) * (x[2]+x[1]) * (x[2]+x[3]))}
-    val = switch[meth](d[key])
+    switch = {'product': lambda TP, FN, TN, FP: TP/(TP+FN) * TN/(TN+FP),
+              'Youden': lambda TP, FN, TN, FP: TP/(TP+FN) + TN/(TN+FP) - 1,
+              'MCC': lambda TP, FN, TN, FP:
+                  (TP*TN - FP*FN) / np.sqrt((TP+FN)*(TP+FP)*(TN+FP)*(TN+FN)) }
+    val = switch[meth](*d[key][:4])
     
     return val
 
@@ -1043,7 +1044,7 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     if os.path.isfile(out_TransEndROC):
         tROC = loadPKL(out_TransEndROC)
         optLen = max(tROC, key = partial(maxKey, d = tROC, meth = optMeth))
-        if (optLen-1) in tROC ((optLen+1) in tROC or optLen == endLenMax):
+        if (optLen-1) in tROC and ((optLen+1) in tROC or optLen == endLenMax):
             logger.info(f'The file {out_TransEndROC} already exists with the '
                         f'optimal end length by {optMeth} being {optLen}.')
             return tROC
