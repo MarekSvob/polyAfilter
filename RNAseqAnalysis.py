@@ -971,7 +971,7 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     return TP, FN, TN, FP, eachTransStartByStrdRef
 
 
-def maxKey(key, d, meth):
+def keyVal(key, d, meth):
     """A helper function for finding a maximum ROC point according to the
     specified optimizing function. In practice, used as a partial function with
     'key' as the missing arg. Methods (other than 'product') taken from Berrar,
@@ -1043,7 +1043,7 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     # If the file already exists, simply load if it contains the final optLen
     if os.path.isfile(out_TransEndROC):
         tROC = loadPKL(out_TransEndROC)
-        optLen = max(tROC, key = partial(maxKey, d = tROC, meth = optMeth))
+        optLen = max(tROC, key = partial(keyVal, d = tROC, meth = optMeth))
         if (optLen-1) in tROC and ((optLen+1) in tROC or optLen == endLenMax):
             logger.info(f'The file {out_TransEndROC} already exists with the '
                         f'optimal end length by {optMeth} being {optLen}.')
@@ -1078,7 +1078,7 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     while not all(checkedJustBelowAbove):
         checkedLens = sorted(tROC)
         # Get the current most optimal endLen using the J statistic or product
-        optLen = max(tROC, key = partial(maxKey, d = tROC, meth = optMeth))
+        optLen = max(tROC, key = partial(keyVal, d = tROC, meth = optMeth))
         logger.info(f'The current optimal end length by {optMeth} is {optLen}.')
         # Settings in the special case when the endLenMax is reached
         if optLen == endLenMax:
@@ -1202,7 +1202,7 @@ def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
     snrROC = {}
 
     # Get the optimal length using the J statistic (or product) & announce
-    optEndLen = max(tROC, key = partial(maxKey, d = tROC, meth = optMeth))
+    optEndLen = max(tROC, key = partial(keyVal, d = tROC, meth = optMeth))
     logger.info(f'The optimal coverage distance length is {optEndLen}. '
                 'Getting an ROC across SNR lengths...')
     # Extract the transROC data for this length
@@ -1293,7 +1293,7 @@ def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
     bam.close()
     # Announce the optimal SNR length
     logger.info('The optimal SNR length is {}.'.format(
-        max(snrROC, key = partial(maxKey, d = snrROC, meth = optMeth))))
+        max(snrROC, key = partial(keyVal, d = snrROC, meth = optMeth))))
     savePKL(out_SNREndROC, snrROC)
 
     return snrROC
@@ -1338,7 +1338,7 @@ def getSNRcovByTrans(SNRsByLenStrdRef, tROC, out_snrROC, bamfile,
         SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)
     
     # Derive the best transcript end length, which is also the SNR coverage len
-    covLen = max(tROC, key = partial(maxKey, d = tROC, meth = optMeth))
+    covLen = max(tROC, key = partial(keyVal, d = tROC, meth = optMeth))
     logger.info(f'The optimal coverage distance length is {covLen}.'
                 'Getting ROC across SNR lengths...')
     # Extract the relevant transcripts starts
