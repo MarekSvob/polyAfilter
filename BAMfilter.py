@@ -21,17 +21,19 @@ logging.basicConfig(level = logging.INFO,
 logger = logging.getLogger(__name__)
 
 
-def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData, 
-              out_db, out_bamfile = None, tROC = {}, includeIntrons = False,
-              cbFile = None, out_cbFile = None, verbose = False):
+def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
+              out_transBaselineData, out_db, out_bamfile = None, tROC = {},
+              includeIntrons = False, cbFile = None, out_cbFile = None,
+              sortedSNRs = True, verbose = False):
     """Function that filters a BAM file to remove non-canonical reads that
     likely resulted from poly(dT) priming onto genomically encoded polyA single
     nucleotide repeats (SNRs), as opposed to mRNA polyA tails.
 
     Parameters
     ----------
-    lenToSNRs : (dict)
-        { SNR length : [ SNR ] }
+    SNRsByLenStrdRef : (dict)
+        { length : { strd : { ref : [ SNRs ] } } } or, alternatively when
+        sortedSNRs = False: { length : [ SNRs ] }
     covLen : (int)
         The assumed distance between the priming event and read coverage.
     minSNRlen : (int, None)
@@ -57,6 +59,9 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     out_cbFile : (str, None), optional
         Location of a new scumi cell barcode count file, if any. If None, the
         cbFile name is used with '.filtered.tsv' appended. The default is None.
+    sortedSNRs : (bool)
+        Indicates whether the SNRs are already sorted by length, strd, and ref.
+        The default is True.
     verbose : (bool)
         Indicates whether extra messages are logged. The default is False.
 
@@ -82,8 +87,8 @@ def BAMfilter(lenToSNRs, covLen, minSNRlen, bamfile, out_transBaselineData,
     # Extract the transcript starts for this coverage length
     eachTransStartByStrdRef = tROC[covLen][4]
     # If relevant, pre-sort SNRs by len, strd & ref
-    if minSNRlen is not None:
-        SNRsByLenStrdRef = sortSNRsByLenStrdRef(lenToSNRs)
+    if minSNRlen is not None and not sortedSNRs:
+        SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)
     # Initialize the set of reads to remove
     toRemove = set()
     # Connect to the bam file
