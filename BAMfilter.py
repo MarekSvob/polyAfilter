@@ -10,7 +10,6 @@ import sys
 import pysam
 import subprocess
 import logging
-import collections
 
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
     sortSNRsByLenStrdRef

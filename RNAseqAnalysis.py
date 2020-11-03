@@ -994,6 +994,8 @@ def keyVal(key, d, meth):
               'MCC': lambda TP, FN, TN, FP:
                   (TP*TN - FP*FN) / np.sqrt((TP+FN)*(TP+FP)*(TN+FP)*(TN+FN)) }
     val = switch[meth](*d[key][:4])
+    if np.isnan(val):
+        val = 0
     
     return val
 
