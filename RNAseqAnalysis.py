@@ -8,9 +8,9 @@ Created on Sat Jun  6 17:00:37 2020
 import os
 import pysam
 import gffutils
-import collections
 import logging
 import numpy as np
+from collections import defaultdict
 from IPython.display import clear_output
 from functools import partial
 
@@ -23,7 +23,7 @@ logging.basicConfig(level = logging.INFO,
                     format = '%(asctime)s - %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-expCovByConcFeat = collections.defaultdict(lambda:collections.defaultdict(int))
+expCovByConcFeat = defaultdict(lambda: defaultdict(int))
 
 
 class NoncGene:
@@ -262,7 +262,7 @@ def getCovPerSNR(out_SNRCovLen, out_SNROutl, lenToSNRs, out_db,
     
     # Initialize the dict to collect all the data
     covByLen = {}
-    outlierPeaks = collections.defaultdict(list)
+    outlierPeaks = defaultdict(list)
     totalCount = 0
     filteredOut = 0
     zeroCovs = 0
@@ -648,8 +648,7 @@ def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons):
     # Otherwise initialize the variables    
     logger.info('Getting baseline data for ROC across covered transcripts, '
                 f'{"including" if includeIntrons else "excluding"} introns...')
-    covTransByStrdRef = collections.defaultdict(
-        lambda: collections.defaultdict(list))
+    covTransByStrdRef = defaultdict(lambda: defaultdict(list))
     Pos = 0
     Neg = 0
     
@@ -901,8 +900,7 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     #  TN ~ Number of bp with 0 coverage outside exon-wise ends
     
     # Initialize a dictionary to save transcript starts for later use:
-    eachTransStartByStrdRef = collections.defaultdict(
-        lambda: collections.defaultdict(list))
+    eachTransStartByStrdRef = defaultdict(lambda: defaultdict(list))
     # Go over each strand and reference separately
     for strd, covTransByRef in covTransByStrdRef.items():
         for refname, trans in covTransByRef.items():
@@ -1144,9 +1142,8 @@ def sortSNRsByLenStrdRef(lenToSNRs):
     """
     
     logger.info('Sorting SNRs by length, strand, and reference...')
-    SNRsByLenStrdRef = collections.defaultdict(
-        lambda: collections.defaultdict(
-            lambda: collections.defaultdict(list)))
+    SNRsByLenStrdRef = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(list)))
     for length, SNRs in lenToSNRs.items():
         for SNR in SNRs:
             SNRsByLenStrdRef[length][SNR.strand][SNR.record].append(SNR)
@@ -1208,8 +1205,7 @@ def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
     # Extract the transROC data for this length
     eachTransStartByStrdRef = tROC[optEndLen][4]
     # Flatten to get transStartsByStrdRef
-    transStartsByStrdRef = collections.defaultdict(
-        lambda: collections.defaultdict(list))
+    transStartsByStrdRef = defaultdict(lambda: defaultdict(list))
     for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
         for refName, eachTransStarts in eachTransStartByRef.items():
             # First, unpack the tuple of tuples; then flatten at once
@@ -1221,8 +1217,7 @@ def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
     # The SNR length cutoff will describe the minimal SNR length included in
     #  non-canonical coverage. For SNRs at each length, flatten the SNRends and
     #  then find where they overlap with the transStarts & get the coverage
-    SNRpiecesByStrdRef = collections.defaultdict(
-        lambda: collections.defaultdict(list))
+    SNRpiecesByStrdRef = defaultdict(lambda: defaultdict(list))
     Pos = tROC[optEndLen][1]  # FN from the transEnd coverage measurement
     Neg = tROC[optEndLen][2]  # TN from the transEnd coverage measurement
     # Initiate the values to be adjusted for each SNR length
@@ -1346,16 +1341,14 @@ def getSNRcovByTrans(SNRsByLenStrdRef, tROC, out_snrROC, bamfile,
     
     # Initialize the SNRpieces found on covered exons by strd & ref - coverage
     #  of these will consitute TP & FP measurements
-    SNRpiecesByStrdRef = collections.defaultdict(
-        lambda: collections.defaultdict(list))
+    SNRpiecesByStrdRef = defaultdict(lambda: defaultdict(list))
     # Initialize the associated measurements that'll be added to over SNR lens
     TP = 0
     FP = 0
     # Initialize the running dict of flattened transStarts whose transcripts
     #  have been found to contain SNRpieces - coverage of these will constitute
     #  the baseline/denominator for Sens/Spec (Pos, Neg)
-    flatTransStartsByStrdRef = collections.defaultdict(
-        lambda: collections.defaultdict(list))
+    flatTransStartsByStrdRef = defaultdict(lambda: defaultdict(list))
     # Initialize the associated measurements that'll be added to over SNR lens
     Pos = 0
     Neg = 0
@@ -1537,7 +1530,7 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
                              includeIntrons)
     covTransByStrdRef = BLdata[0]
     # Sort the covered transcripts by geneID
-    covTransByGene = collections.defaultdict(list)
+    covTransByGene = defaultdict(list)
     for covTransByRef in covTransByStrdRef.values():
         for covTrans in covTransByRef.values():
             for covTran in covTrans:
