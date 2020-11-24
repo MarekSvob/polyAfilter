@@ -8,8 +8,6 @@ Created on Wed Sep  9 09:11:28 2020
 import os
 import pysam
 import logging
-import pandas as pd
-from io import StringIO
 
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
     sortSNRsByLenStrdRef
@@ -25,9 +23,10 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
               out_transBaselineData, out_db, out_bamfile = None, tROC = {},
               includeIntrons = False, cbFile = None, out_cbFile = None,
               sortedSNRs = True, verbose = False):
-    """Function that filters a BAM file to remove non-canonical alignments that
-    likely resulted from poly(dT) priming onto genomically encoded polyA single
-    nucleotide repeats (SNRs), as opposed to mRNA polyA tails.
+    """Function that filters an indexed BAM file to remove non-canonical
+    alignments that likely resulted from poly(dT) priming onto genomically
+    encoded polyA single nucleotide repeats (SNRs), as opposed to mRNA polyA
+    tails.
 
     Parameters
     ----------
@@ -41,7 +40,7 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
         The shortest SNR length to consider. If None, remove all non-end
         coverage.
     bamfile : (str)
-        Location of the bamfile to be filtered.
+        Location of the sorted and indexed bamfile to be filtered.
     out_transBaselineData : (str)
         Path to the saved baseline data, if done before.
     out_db : (str)
@@ -147,20 +146,19 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
     # Filter the cbFile, if any
     if cbFile and toRemoveN:
         cbFileFilter(toRemove, cbFile, out_cbFile, verbose)
-    # Get the total number of reads in the indexed bam file
-    indStats = pd.read_csv(StringIO(pysam.idxstats(bamfile)),
-                           sep = '\t', index_col = 0, header = None)
-    total = sum(indStats[2]) + sum(indStats[3])
     
+    # Create the bamfile and add the reads not in the toRemove set
+    # Manually reopen the bam file to avoid multiple iterators issues
+    bamIN = pysam.AlignmentFile(bamfile, 'rb')   
+    # Get the total number of reads in the indexed bam file
+    total = bamIN.mapped + bamIN.unmapped
     logger.info(f'Writing the filtered BAM file, to exclude {toRemoveN:,d} '
                 f'alignments out of {total:,d} total...')
-    # Create the bamfile and add the reads not in the toRemove set
-    nAll = 0
-    included = 0
-    # Manually reopen the bam file to avoid multiple iterators issues
-    bamIN = pysam.AlignmentFile(bamfile, 'rb')    
+    
     bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bamIN)
     
+    nAll = 0
+    included = 0
     for read in bamIN.fetch(until_eof = True):
         nAll += 1
         if read not in toRemove:
@@ -205,6 +203,7 @@ def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
         logger.info('Counting UMIs per cell to be removed from the CB file...')
     # Import the modules that are only necessary if a cbFile was provided
     import numpy as np
+    import pandas as pd
     import regex as re
     from collections import defaultdict
     from functools import partial
