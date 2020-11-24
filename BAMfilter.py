@@ -6,9 +6,7 @@ Created on Wed Sep  9 09:11:28 2020
 @author: marek
 """
 import os
-import sys
 import pysam
-import subprocess
 import logging
 
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
@@ -148,8 +146,8 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
     if cbFile and toRemoveN:
         cbFileFilter(toRemove, cbFile, out_cbFile, verbose)
     
-    logger.info(f'Writing the filtered BAM file, to exclude a total of '
-                '{toRemoveN:,d} alignments...')
+    logger.info('Writing the filtered BAM file, to exclude a total of '
+                f'{toRemoveN:,d} alignments...')
     # Create the bamfile and add the reads not in the toRemove set
     nAll = 0
     excluded = 0
