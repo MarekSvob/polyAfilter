@@ -8,6 +8,8 @@ Created on Wed Sep  9 09:11:28 2020
 import os
 import pysam
 import logging
+import pandas as pd
+from io import StringIO
 
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
     sortSNRsByLenStrdRef
@@ -145,30 +147,33 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
     # Filter the cbFile, if any
     if cbFile and toRemoveN:
         cbFileFilter(toRemove, cbFile, out_cbFile, verbose)
+    # Get the total number of reads in the indexed bam file
+    indStats = pd.read_csv(StringIO(pysam.idxstats(bamfile)),
+                           sep = '\t', index_col = 0, header = None)
+    total = sum(indStats[2]) + sum(indStats[3])
     
-    logger.info('Writing the filtered BAM file, to exclude a total of '
-                f'{toRemoveN:,d} alignments...')
+    logger.info(f'Writing the filtered BAM file, to exclude {toRemoveN:,d} '
+                f'alignments out of {total:,d} total...')
     # Create the bamfile and add the reads not in the toRemove set
     nAll = 0
-    excluded = 0
-    # Manually reopen the bam to avoid multiple iterators issues
+    included = 0
+    # Manually reopen the bam file to avoid multiple iterators issues
     bamIN = pysam.AlignmentFile(bamfile, 'rb')    
     bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bamIN)
     
     for read in bamIN.fetch(until_eof = True):
         nAll += 1
-        if read in toRemove:
-            excluded += 1
-        else:
+        if read not in toRemove:
             bamOUT.write(read)
+            included += 1
             
-        if verbose and excluded and not excluded % 10000000:
-            logger.info(f'Excluded {excluded:,d} alignments...')
+        if verbose and nAll and not nAll % 10000000:
+            logger.info(f'Processed {nAll:,d} alignments...')
             
     # Close the files
     bamIN.close()
     bamOUT.close()
-    logger.info(f'A filtered BAM file with {nAll-excluded:,d}/{nAll:,d} '
+    logger.info(f'A filtered BAM file with {included:,d}/{nAll:,d} '
                 'alignments has been created. [Excluded alignments '
                 f'{covLen:,d} bp upstream of non-terminal SNR{minSNRlen}+.]')
         
@@ -200,7 +205,6 @@ def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
         logger.info('Counting UMIs per cell to be removed from the CB file...')
     # Import the modules that are only necessary if a cbFile was provided
     import numpy as np
-    import pandas as pd
     import regex as re
     from collections import defaultdict
     from functools import partial
