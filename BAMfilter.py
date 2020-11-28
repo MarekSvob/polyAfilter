@@ -174,6 +174,10 @@ def getAlignmentsToRemove(strd, refName, eachTransStart):
                     toRemoveSet.add(read)
     bam.close()
     
+    if verbose:
+        logger.info('Identified alignments to be removed on reference '
+                    f'{refName}{"+" if strd else "-"}.')
+    
     return(toRemoveSet)
 
 
