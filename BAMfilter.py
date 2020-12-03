@@ -359,7 +359,7 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
             for refName, eachTransStart in eachTransStartByRef.items():
                 pool.apply_async(func = getAlignmentsToRemove,
                                  args = (strd, refName, eachTransStart),
-                                 callback = toRemove.update())
+                                 callback = toRemove.update)
         # Close the pool
         pool.close()
         # Join the processes
