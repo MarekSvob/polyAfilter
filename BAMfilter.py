@@ -19,6 +19,9 @@ logging.basicConfig(level = logging.INFO,
                     format = '%(asctime)s - %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
+# Global vars
+# Set of alignements to remove
+toRemove = set()
 
 def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
     """Function that subtracts the appropriate numbers from the CB counts,
@@ -175,8 +178,8 @@ def getAlignmentsToRemove(strd, refName, eachTransStart):
     bam.close()
     
     if verbose:
-        logger.info('Identified alignments to be removed on reference '
-                    f'{refName}{"+" if strd else "-"}.')
+        logger.info(f'Identified {len(toRemoveSet)} alignments to be removed '
+                    f'on reference {refName}{"+" if strd else "-"}.')
     
     return(toRemoveSet)
 
@@ -214,6 +217,22 @@ def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
     minSNRlen = _minSNRlen
     bamfile = _bamfile
     verbose = _verbose
+    
+def collect_set(s):
+    """Helper function to collect the result of each parallel worker.
+
+    Parameters
+    ----------
+    s : (set)
+        The set of alignments to remove identified in a thread.
+
+    Returns
+    -------
+    None.
+    """
+    global toRemove
+    
+    toRemove.update(s)
 
 
 def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
@@ -269,6 +288,7 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
     -------
     None.
     """
+    global toRemove
     
     # Initiate the correct output file name
     if out_bamfile is None:
@@ -292,8 +312,6 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
         
     logger.info(f'Identifying alignments {covLen:,d} bp upstream of '
                 f'non-terminal SNR{minSNRlen}+ to be removed...')
-    # Initialize the set of reads to remove
-    toRemove = set()
     
     if nThreads is None:
         # Connect to the bam file
@@ -359,7 +377,7 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
             for refName, eachTransStart in eachTransStartByRef.items():
                 pool.apply_async(func = getAlignmentsToRemove,
                                  args = (strd, refName, eachTransStart),
-                                 callback = toRemove.update)
+                                 callback = collect_set)
         # Close the pool
         pool.close()
         # Join the processes
