@@ -8,11 +8,12 @@ Created on Wed Sep  9 09:11:28 2020
 import os
 import pysam
 import logging
-from multiprocess import Pool
+from multiprocessing import Pool
 
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
     sortSNRsByLenStrdRef
 from SNRanalysis import flattenIntervals, getOverlaps
+from SNRdetection import savePKL, loadPKL
 
 
 logging.basicConfig(level = logging.INFO,
@@ -111,7 +112,7 @@ def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
 
 def getAlignmentsToRemove(strd, refName, eachTransStart):
     """Helper function to run on each thread for a multithreaded alignment
-    identification.
+    identification and write as temporary files to be merged later.
     
     strd : (bool)
         Strand of the reference; +(True) / -(False)
@@ -123,8 +124,7 @@ def getAlignmentsToRemove(strd, refName, eachTransStart):
     
     Returns
     -------
-    toRemoveSet : (set)
-        The set of alignments to remove.
+    None.
     """
     
     # Initialize the output
@@ -178,7 +178,7 @@ def getAlignmentsToRemove(strd, refName, eachTransStart):
         logger.info(f'Identified {len(toRemoveSet):,d} alignments to be '
                     f'removed on reference {refName}{"+" if strd else "-"}.')
     
-    return(toRemoveSet)
+    savePKL(loc = f'{bamfile}_{strd}_{refName}', var = toRemoveSet)
 
 
 def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
@@ -214,27 +214,7 @@ def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
     minSNRlen = _minSNRlen
     bamfile = _bamfile
     verbose = _verbose
-
-
-def collect_set(s):
-    """Helper function to collect the result from each parallel worker.
-
-    Parameters
-    ----------
-    s : (set)
-        The set of alignments to remove identified in a thread.
-
-    Returns
-    -------
-    None.
-    """
-    global toRemove
     
-    toRemove.update(s)
-    
-    logger.info(f'There are now {len(toRemove):,d} alignments to be removed.')
-    
-
 
 def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
               out_transBaselineData, out_db, out_bamfile = None, tROC = {},
@@ -288,9 +268,7 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
     Returns
     -------
     None.
-    """
-    #global toRemove
-    
+    """    
     # Initiate the correct output file name
     if out_bamfile is None:
         out_bamfile = bamfile + '.filtered.bam'
@@ -311,12 +289,13 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
     if minSNRlen is not None and not sortedSNRs:
         SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)
         
-    logger.info(f'Identifying alignments {covLen:,d} bp upstream of '
-                f'non-terminal SNR{minSNRlen}+ to be removed...')
     # Initialize the set of alignments to be removed (global var)
     toRemove = set()
     
     if nThreads is None:
+        logger.info(f'Identifying alignments {covLen:,d} bp upstream of non-'
+                    f'terminal SNR{minSNRlen}+ to be removed in 1 serial '
+                    'process...')
         # Connect to the bam file
         bam = pysam.AlignmentFile(bamfile, 'rb')
         
@@ -368,6 +347,9 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
         bam.close()
     
     else:
+        logger.info(f'Identifying alignments {covLen:,d} bp upstream of non-'
+                    f'terminal SNR{minSNRlen}+ to be removed across {nThreads}'
+                    ' parallel processes with temporary files...')
         # Set the number of threads for NumExpr (used by pandas & numpy)
         os.environ['NUMEXPR_MAX_THREADS'] = str(nThreads)
         # Create a pool of processes with shared variables
@@ -376,19 +358,22 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
             initializer = child_initialize,
             initargs = (SNRsByLenStrdRef, covLen, minSNRlen, bamfile, verbose))
         # Identify the alignments to be removed by strand / ref
-        results = []
+        strdRefs = []
         for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
             for refName, eachTransStart in eachTransStartByRef.items():
-                results.append(pool.apply_async(
-                    func = getAlignmentsToRemove,
-                    args = (strd, refName, eachTransStart)))
+                strdRefs.append((strd, refName))
+                pool.apply_async(func = getAlignmentsToRemove,
+                                 args = (strd, refName, eachTransStart))
         # Close the pool
         pool.close()
         # Join the processes
         pool.join()
         
-        for result in results:
-            toRemove.update(result.get())
+        # Merge the temporary files into a single set
+        for strand, ref in strdRefs:
+            tempfile = f'{bamfile}_{strd}_{refName}'
+            toRemove.update(loadPKL(tempfile))
+            os.remove(tempfile)
     
     toRemoveN = len(toRemove)
     # Filter the cbFile, if any
