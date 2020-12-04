@@ -231,6 +231,9 @@ def collect_set(s):
     """
     global toRemove
     
+    logger.info('Removed alignments passed over and')
+    logger.info('there was {len(s)} of them.')
+    
     try:
         toRemove.update(s)
     except:
