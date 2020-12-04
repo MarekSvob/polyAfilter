@@ -19,9 +19,6 @@ logging.basicConfig(level = logging.INFO,
                     format = '%(asctime)s - %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-# Global vars
-# Set of alignements to remove
-toRemove = set()
 
 def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
     """Function that subtracts the appropriate numbers from the CB counts,
@@ -178,14 +175,14 @@ def getAlignmentsToRemove(strd, refName, eachTransStart):
     bam.close()
     
     if verbose:
-        logger.info(f'Identified {len(toRemoveSet)} alignments to be removed '
-                    f'on reference {refName}{"+" if strd else "-"}.')
+        logger.info(f'Identified {len(toRemoveSet):,d} alignments to be '
+                    f'removed on reference {refName}{"+" if strd else "-"}.')
     
     return(toRemoveSet)
 
 
 def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
-                     _verbose):
+                     _verbose, _toRemove):
     """Helper function to initialize and share variables between parallel
     processes. Taken from
     https://stackoverflow.com/questions/25825995/python-multiprocessing-only-one-process-is-running
@@ -210,13 +207,14 @@ def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
     -------
     None.
     """
-    global SNRsByLenStrdRef, covLen, minSNRlen, bamfile, verbose
+    global SNRsByLenStrdRef, covLen, minSNRlen, bamfile, verbose, toRemove
     
     SNRsByLenStrdRef = _SNRsByLenStrdRef
     covLen = _covLen
     minSNRlen = _minSNRlen
     bamfile = _bamfile
     verbose = _verbose
+    toRemove = _toRemove
     
 def collect_set(s):
     """Helper function to collect the result of each parallel worker.
@@ -233,6 +231,9 @@ def collect_set(s):
     global toRemove
     
     toRemove.update(s)
+    
+    logger.info(f'There are now {len(toRemove):,d} alignments to be removed.')
+    
 
 
 def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
@@ -312,6 +313,8 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
         
     logger.info(f'Identifying alignments {covLen:,d} bp upstream of '
                 f'non-terminal SNR{minSNRlen}+ to be removed...')
+    # Initialize the set of alignments to be removed (global var)
+    toRemove = set()
     
     if nThreads is None:
         # Connect to the bam file
@@ -371,7 +374,8 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
         pool = Pool(
             processes = nThreads,
             initializer = child_initialize,
-            initargs = (SNRsByLenStrdRef, covLen, minSNRlen, bamfile, verbose))
+            initargs = (SNRsByLenStrdRef, covLen, minSNRlen, bamfile, verbose,
+                        toRemove))
         # Identify the alignments to be removed by strand / ref
         for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
             for refName, eachTransStart in eachTransStartByRef.items():
