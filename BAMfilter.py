@@ -232,7 +232,7 @@ def collect_set(s):
     global toRemove
     
     logger.info('Removed alignments passed over and')
-    logger.info('there was {len(s)} of them.')
+    logger.info(f'there was {len(s)} of them.')
     
     try:
         toRemove.update(s)
@@ -384,15 +384,19 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
             initargs = (SNRsByLenStrdRef, covLen, minSNRlen, bamfile, verbose,
                         toRemove))
         # Identify the alignments to be removed by strand / ref
+        results = []
         for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
             for refName, eachTransStart in eachTransStartByRef.items():
-                pool.apply_async(func = getAlignmentsToRemove,
-                                 args = (strd, refName, eachTransStart),
-                                 callback = collect_set)
+                results.append(pool.apply_async(func = getAlignmentsToRemove,
+                                                args = (strd, refName, eachTransStart),
+                                                callback = collect_set))
         # Close the pool
         pool.close()
         # Join the processes
         pool.join()
+    
+    for result in results:
+        result.get()
     
     toRemoveN = len(toRemove)
     # Filter the cbFile, if any
