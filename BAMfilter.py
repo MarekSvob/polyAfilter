@@ -215,9 +215,10 @@ def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
     bamfile = _bamfile
     verbose = _verbose
     toRemove = _toRemove
-    
+
+
 def collect_set(s):
-    """Helper function to collect the result of each parallel worker.
+    """Helper function to collect the result from each parallel worker.
 
     Parameters
     ----------
@@ -230,7 +231,10 @@ def collect_set(s):
     """
     global toRemove
     
-    toRemove.update(s)
+    try:
+        toRemove.update(s)
+    except:
+        logger.exception('Exception occurred: ')   
     
     logger.info(f'There are now {len(toRemove):,d} alignments to be removed.')
     
