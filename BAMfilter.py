@@ -8,7 +8,7 @@ Created on Wed Sep  9 09:11:28 2020
 import os
 import pysam
 import logging
-from multiprocessing import Pool
+from multiprocess import Pool
 
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
     sortSNRsByLenStrdRef
@@ -181,8 +181,7 @@ def getAlignmentsToRemove(strd, refName, eachTransStart):
     return(toRemoveSet)
 
 
-def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
-                     _verbose, _toRemove):
+def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile, _verbose):
     """Helper function to initialize and share variables between parallel
     processes. Taken from
     https://stackoverflow.com/questions/25825995/python-multiprocessing-only-one-process-is-running
@@ -207,14 +206,13 @@ def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
     -------
     None.
     """
-    global SNRsByLenStrdRef, covLen, minSNRlen, bamfile, verbose, toRemove
+    global SNRsByLenStrdRef, covLen, minSNRlen, bamfile, verbose
     
     SNRsByLenStrdRef = _SNRsByLenStrdRef
     covLen = _covLen
     minSNRlen = _minSNRlen
     bamfile = _bamfile
     verbose = _verbose
-    toRemove = _toRemove
 
 
 def collect_set(s):
@@ -231,13 +229,7 @@ def collect_set(s):
     """
     global toRemove
     
-    logger.info('Removed alignments passed over and')
-    logger.info(f'there was {len(s)} of them.')
-    
-    try:
-        toRemove.update(s)
-    except:
-        logger.exception('Exception occurred: ')   
+    toRemove.update(s)
     
     logger.info(f'There are now {len(toRemove):,d} alignments to be removed.')
     
@@ -381,22 +373,17 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
         pool = Pool(
             processes = nThreads,
             initializer = child_initialize,
-            initargs = (SNRsByLenStrdRef, covLen, minSNRlen, bamfile, verbose,
-                        toRemove))
+            initargs = (SNRsByLenStrdRef, covLen, minSNRlen, bamfile, verbose))
         # Identify the alignments to be removed by strand / ref
-        results = []
         for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
             for refName, eachTransStart in eachTransStartByRef.items():
-                results.append(pool.apply_async(func = getAlignmentsToRemove,
-                                                args = (strd, refName, eachTransStart),
-                                                callback = collect_set))
+                pool.apply_async(func = getAlignmentsToRemove,
+                                 args = (strd, refName, eachTransStart),
+                                 callback = collect_set)
         # Close the pool
         pool.close()
         # Join the processes
         pool.join()
-    
-    for result in results:
-        result.get()
     
     toRemoveN = len(toRemove)
     # Filter the cbFile, if any
