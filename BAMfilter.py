@@ -181,7 +181,8 @@ def getAlignmentsToRemove(strd, refName, eachTransStart):
     return(toRemoveSet)
 
 
-def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile, _verbose):
+def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
+                     _verbose):
     """Helper function to initialize and share variables between parallel
     processes. Taken from
     https://stackoverflow.com/questions/25825995/python-multiprocessing-only-one-process-is-running
@@ -288,7 +289,7 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
     -------
     None.
     """
-    global toRemove
+    #global toRemove
     
     # Initiate the correct output file name
     if out_bamfile is None:
@@ -375,15 +376,19 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
             initializer = child_initialize,
             initargs = (SNRsByLenStrdRef, covLen, minSNRlen, bamfile, verbose))
         # Identify the alignments to be removed by strand / ref
+        results = []
         for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
             for refName, eachTransStart in eachTransStartByRef.items():
-                pool.apply_async(func = getAlignmentsToRemove,
-                                 args = (strd, refName, eachTransStart),
-                                 callback = collect_set)
+                results.append(pool.apply_async(
+                    func = getAlignmentsToRemove,
+                    args = (strd, refName, eachTransStart)))
         # Close the pool
         pool.close()
         # Join the processes
         pool.join()
+        
+        for result in results:
+            toRemove.update(result.get())
     
     toRemoveN = len(toRemove)
     # Filter the cbFile, if any
