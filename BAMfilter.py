@@ -13,7 +13,6 @@ from multiprocessing import Pool
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
     sortSNRsByLenStrdRef
 from SNRanalysis import flattenIntervals, getOverlaps
-from SNRdetection import savePKL, loadPKL
 
 
 logging.basicConfig(level = logging.INFO,
@@ -127,9 +126,6 @@ def getAlignmentsToRemove(strd, refName, eachTransStart):
     None.
     """
     
-    # Initialize the output
-    toRemoveSet = set()
-    
     if verbose:
         logger.info('Identifying alignments to be removed on reference '
                     f'{refName}{"+" if strd else "-"}...')
@@ -140,6 +136,7 @@ def getAlignmentsToRemove(strd, refName, eachTransStart):
     # Connect to the bam file for each thread separately
     bam = pysam.AlignmentFile(bamfile, 'rb')
     refLen = bam.get_reference_length(refName)
+    
     # Flatten all the expressed transcript starts on this strd/ref
     # minSNRlen = None means that all non-end coverage is removed,
     #  regardless of SNR pieces
@@ -161,28 +158,33 @@ def getAlignmentsToRemove(strd, refName, eachTransStart):
         SNRpieces = flattenIntervals(SNRpieces)
         # Find overlaps between SNRpieces & tStarts
         SNRpieceOverlaps = getOverlaps(flatStarts, SNRpieces)
-    # Go over all the pieces to fetch the alignments
+    
+    # Go over all the pieces to fetch the alignments & write them into a temp
+    tempFile = f'{out_bamfile}_{strd}_{refName}.bam'
+    counter = 0
+    bamTEMP = pysam.AlignmentFile(tempFile, 'wb', template = bam)
     for start, end in SNRpieceOverlaps:
-        for read in bam.fetch(contig = refName, start = start, stop = end):
-            # Ensure the read is on the correct strd before adding
-            if read.is_reverse != strd:
-                # Make sure that reads filtered do indeed map onto
-                #  the area identified, not just overlap it with
-                #  their start-end range (in case of splicing)
-                mapping = getOverlaps(read.get_blocks(), [(start, end)])
+        for alignment in bam.fetch(contig = refName, start = start, stop = end):
+            # Ensure the alignment is on the correct strd before adding
+            if alignment.is_reverse != strd:
+                # Make sure that alignments filtered indeed map onto the area
+                #  identified, not just overlap it with their start-end range
+                #  (in case of splicing)
+                mapping = getOverlaps(alignment.get_blocks(), [(start, end)])
                 if mapping != []:
-                    toRemoveSet.add(read)
+                    bamTEMP.write(alignment)
+                    counter += 1
     bam.close()
+    bamTEMP.close()
     
     if verbose:
-        logger.info(f'Identified {len(toRemoveSet):,d} alignments to be '
-                    f'removed on reference {refName}{"+" if strd else "-"}.')
-    
-    savePKL(loc = f'{bamfile}_{strd}_{refName}', var = toRemoveSet)
+        logger.info(f'Identified {counter:,d} alignments to be removed on '
+                    f'reference {refName}{"+" if strd else "-"} and saved to '
+                    f'{tempFile}.')
 
 
 def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
-                     _verbose):
+                     _verbose, _out_bamfile):
     """Helper function to initialize and share variables between parallel
     processes. Taken from
     https://stackoverflow.com/questions/25825995/python-multiprocessing-only-one-process-is-running
@@ -200,21 +202,24 @@ def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
         coverage.
     _bamfile : (str)
         Location of the sorted and indexed bamfile to be filtered.
-    _verbose : (bool), optional
+    _verbose : (bool)
         Indicates whether extra messages are logged. The default is False.
+    _out_bamfile : (str)
+        The location of the target bamfile to save temporary files in the same
+        folder.
 
     Returns
     -------
     None.
     """
-    global SNRsByLenStrdRef, covLen, minSNRlen, bamfile, verbose
+    global SNRsByLenStrdRef, covLen, minSNRlen, bamfile, verbose, out_bamfile
     
     SNRsByLenStrdRef = _SNRsByLenStrdRef
     covLen = _covLen
     minSNRlen = _minSNRlen
     bamfile = _bamfile
     verbose = _verbose
-    
+    out_bamfile = _out_bamfile
 
 def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
               out_transBaselineData, out_db, out_bamfile = None, tROC = {},
@@ -333,30 +338,30 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
                     SNRpieceOverlaps = getOverlaps(flatStarts, SNRpieces)
                 # Go over all the pieces to fetch the alignments
                 for start, end in SNRpieceOverlaps:
-                    for read in bam.fetch(contig = refName, start = start,
-                                          stop = end):
-                        # Ensure the read is on the correct strd before adding
-                        if read.is_reverse != strd:
-                            # Make sure that reads filtered do indeed map onto
+                    for alignment in bam.fetch(
+                            contig = refName, start = start, stop = end):
+                        # Ensure the alignment is on the correct strd
+                        if alignment.is_reverse != strd:
+                            # Make sure that filtered alignments indeed map to
                             #  the area identified, not just overlap it with
                             #  their start-end range (in case of splicing)
-                            mapping = getOverlaps(read.get_blocks(),
+                            mapping = getOverlaps(alignment.get_blocks(),
                                                   [(start, end)])
                             if mapping != []:
-                                toRemove.add(read)
+                                toRemove.add(alignment)
         bam.close()
     
     else:
         logger.info(f'Identifying alignments {covLen:,d} bp upstream of non-'
                     f'terminal SNR{minSNRlen}+ to be removed across {nThreads}'
-                    ' parallel processes with temporary files...')
+                    ' parallel processes and writing temporary files...')
         # Set the number of threads for NumExpr (used by pandas & numpy)
         os.environ['NUMEXPR_MAX_THREADS'] = str(nThreads)
         # Create a pool of processes with shared variables
-        pool = Pool(
-            processes = nThreads,
-            initializer = child_initialize,
-            initargs = (SNRsByLenStrdRef, covLen, minSNRlen, bamfile, verbose))
+        pool = Pool(processes = nThreads,
+                    initializer = child_initialize,
+                    initargs = (SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
+                                verbose, out_bamfile))
         # Identify the alignments to be removed by strand / ref
         strdRefs = []
         for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
@@ -369,10 +374,15 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
         # Join the processes
         pool.join()
         
-        # Merge the temporary files into a single set
+        # Merge the temporary files into a single set & remove the files
+        logger.info(f'Merging {len(strdRefs)} temporary files into memory and '
+                    'deleting...')
         for strand, ref in strdRefs:
-            tempfile = f'{bamfile}_{strd}_{refName}'
-            toRemove.update(loadPKL(tempfile))
+            tempfile = f'{out_bamfile}_{strand}_{ref}.bam'
+            bamTEMP = pysam.AlignmentFile(tempfile, 'rb')
+            for alignment in bamTEMP.fetch(until_eof = True):
+                toRemove.add(alignment)
+            bamTEMP.close()
             os.remove(tempfile)
     
     toRemoveN = len(toRemove)
@@ -391,14 +401,14 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
     bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bamIN)
     nAll = 0
     included = 0
-    for read in bamIN.fetch(until_eof = True):
+    for alignment in bamIN.fetch(until_eof = True):
         nAll += 1
-        if read not in toRemove:
-            bamOUT.write(read)
+        if alignment not in toRemove:
+            bamOUT.write(alignment)
             included += 1
             
         if verbose and nAll and not nAll % 10000000:
-            logger.info(f'Processed {nAll:,d} alignments...')
+            logger.info(f'Processed {nAll:,d} input alignments...')
             
     # Close the files
     bamIN.close()
