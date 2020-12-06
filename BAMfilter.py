@@ -342,6 +342,10 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
                     SNRpieces = flattenIntervals(SNRpieces)
                     # Find overlaps between SNRpieces & tStarts
                     SNRpieceOverlaps = getOverlaps(flatStarts, SNRpieces)
+                
+                # Remove SNRsByLenStrdRef to free up RAM for the alingments
+                del SNRsByLenStrdRef
+                
                 # Go over all the pieces to fetch the alignments
                 for start, end in SNRpieceOverlaps:
                     for alignment in bam.fetch(
@@ -380,6 +384,9 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
         # Join the processes
         pool.join()
         
+        # Remove SNRsByLenStrdRef to free up RAM for the set of alingments
+        del SNRsByLenStrdRef
+        
         # Merge the temporary files into a single set & remove the files
         logger.info(f'Merging {len(strdRefs)} temporary files into memory and '
                     'deleting...')
@@ -390,9 +397,6 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
                 toRemove.add(alignment)
             bamTEMP.close()
             os.remove(tempfile)
-    
-    # Remove SNRsByLenStrdRef to free up RAM
-    del SNRsByLenStrdRef
     
     toRemoveN = len(toRemove)
     # Filter the cbFile, if any
