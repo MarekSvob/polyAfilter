@@ -9,7 +9,6 @@ import os
 import gc
 import pysam
 import logging
-import concurrent.futures
 import multiprocessing
 import multiprocessing.pool
 
@@ -309,7 +308,7 @@ def parallel_wrapper(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
                 f'terminal SNR{minSNRlen}+ to be removed across {nThreads} '
                 'parallel processes and writing temporary files...')
     # Create a pool of processes with shared variables
-    pool = multiprocessing.pool(processes = nThreads,
+    pool = multiprocessing.Pool(processes = nThreads,
                                 initializer = child_initialize,
                                 initargs = (SNRsByLenStrdRef, covLen,
                                             minSNRlen, bamfile, verbose,
