@@ -6,6 +6,7 @@ Created on Wed Sep  9 09:11:28 2020
 @author: marek
 """
 import os
+import gc
 import pysam
 import logging
 from multiprocessing import Pool
@@ -345,6 +346,7 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
                 
                 # Remove SNRsByLenStrdRef to free up RAM for the alingments
                 del SNRsByLenStrdRef
+                gc.collect()
                 
                 # Go over all the pieces to fetch the alignments
                 for start, end in SNRpieceOverlaps:
@@ -386,6 +388,7 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
         
         # Remove SNRsByLenStrdRef to free up RAM for the set of alingments
         del SNRsByLenStrdRef
+        gc.collect()
         
         # Merge the temporary files into a single set & remove the files
         logger.info(f'Merging {len(strdRefs)} temporary files into memory and '
