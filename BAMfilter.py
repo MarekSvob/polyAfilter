@@ -13,6 +13,7 @@ from multiprocessing import Pool
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
     sortSNRsByLenStrdRef
 from SNRanalysis import flattenIntervals, getOverlaps
+from SNRdetection import loadPKL
 
 
 logging.basicConfig(level = logging.INFO,
@@ -221,20 +222,19 @@ def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
     verbose = _verbose
     out_bamfile = _out_bamfile
 
-def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
+def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
               out_transBaselineData, out_db, out_bamfile = None, tROC = {},
               includeIntrons = False, cbFile = None, out_cbFile = None,
               sortedSNRs = True, verbose = False, nThreads = None):
     """Function that filters an indexed BAM file to remove non-canonical
     alignments that likely resulted from poly(dT) priming onto genomically
     encoded polyA single nucleotide repeats (SNRs), as opposed to mRNA polyA
-    tails.
+    tails. Note that parallel processing will produce the following warning
+    for each temp file, which can be safely ignored:
+        "[E::idx_find_and_load] Could not retrieve index file for <file>"
 
     Parameters
     ----------
-    SNRsByLenStrdRef : (dict)
-        { length : { strd : { ref : [ SNRs ] } } } or, alternatively when
-        sortedSNRs = False: { length : [ SNRs ] }
     covLen : (int)
         The assumed distance between the beginning of alignment coverage and
         the priming event.
@@ -243,6 +243,10 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
         coverage.
     bamfile : (str)
         Location of the sorted and indexed bamfile to be filtered.
+    out_SNRsByLenStrdRef : (str)
+        Location of the SNRS to be loaded, such that:
+        { length : { strd : { ref : [ SNRs ] } } } or, alternatively when
+        sortedSNRs = False: { length : [ SNRs ] }
     out_transBaselineData : (str)
         Path to the saved baseline data, if done before.
     out_db : (str)
@@ -267,8 +271,9 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
     verbose : (bool), optional
         Indicates whether extra messages are logged. The default is False.
     nThreads : (int), optional
-        Set the maximum number of threads to use. If None, serial threading is
-        used but not enforced. The default is None.
+        Set the maximum number of threads to use. If None, serial processing is
+        used but not enforced (underlying processes may use multiple threads).
+        The default is None.
 
     Returns
     -------
@@ -290,7 +295,8 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
                                            includeIntrons, getSensSpec = False)    
     # Extract the transcript starts for this coverage length
     eachTransStartByStrdRef = tROC[covLen][4]
-    # If relevant, pre-sort SNRs by len, strd & ref
+    # Load and, if relevant, pre-sort SNRs by len, strd & ref
+    SNRsByLenStrdRef = loadPKL(out_SNRsByLenStrdRef)
     if minSNRlen is not None and not sortedSNRs:
         SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)
         
@@ -385,6 +391,9 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
             bamTEMP.close()
             os.remove(tempfile)
     
+    # Remove SNRsByLenStrdRef to free up RAM
+    del SNRsByLenStrdRef
+    
     toRemoveN = len(toRemove)
     # Filter the cbFile, if any
     if cbFile and toRemoveN:
@@ -408,12 +417,13 @@ def BAMfilter(SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
             included += 1
             
         if verbose and nAll and not nAll % 10000000:
-            logger.info(f'Processed {nAll:,d} input alignments...')
+            logger.info(f'Processed {nAll:,d} input alignments, of which '
+                        f'{nAll-included:,d} were excluded...')
             
     # Close the files
     bamIN.close()
     bamOUT.close()
-    logger.info(f'A filtered BAM file with {included:,d}/{nAll:,d} '
-                'alignments has been created. [Excluded alignments '
+    logger.info(f'A filtered BAM file with {included:,d}/{nAll:,d} alignments '
+                f'has been created. [Excluded {nAll-included:,d} alignments '
                 f'{covLen:,d} bp upstream of non-terminal SNR{minSNRlen}+.]')
     
