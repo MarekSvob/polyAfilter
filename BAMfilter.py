@@ -244,9 +244,9 @@ class MyPool(multiprocessing.pool.Pool):
     Process = AngelProcess
     
 
-def parallel_wrapper(eachTransStartByStrdRef, covLen, minSNRlen, bamfile,
-                     out_SNRsByLenStrdRef, out_bamfile, sortedSNRs, verbose,
-                     nThreads):
+def parallel_wrapper(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
+                     out_transBaselineData, out_db, out_bamfile, tROC,
+                     includeIntrons, sortedSNRs, verbose, nThreads):
     """Helper function to hold SNRsByLenStrdRef in RAM only temporarily.
     
     Parameters
@@ -266,10 +266,18 @@ def parallel_wrapper(eachTransStartByStrdRef, covLen, minSNRlen, bamfile,
         Location of the SNRS to be loaded, such that:
         { length : { strd : { ref : [ SNRs ] } } } or, alternatively when
         sortedSNRs = False: { length : [ SNRs ] }
+    out_transBaselineData : (str)
+        Path to the saved baseline data, if done before.
+    out_db : (str)
+        Path to the saved GTF/GFF database.
     out_bamfile : (str, None)
         Location of the resulting filtered bamfile. If None, the name of the
         input bamfile name is used with '.filtered.bam' appended. The default
         is None.
+    tROC : (dict)
+        { endLen : ( TP, FN, TN, FP, eachTransStartByStrdRef ) }.
+    includeIntrons : (bool)
+        Indicates whether to consider intron coverage.
     sortedSNRs : (bool)
         Indicates whether the SNRs are already sorted by length, strd, and ref.
     verbose : (bool)
@@ -284,12 +292,22 @@ def parallel_wrapper(eachTransStartByStrdRef, covLen, minSNRlen, bamfile,
         [ (strd, ref) ]
     """
     
-    logger.info(f'Identifying alignments {covLen:,d} bp upstream of non-'
-                f'terminal SNR{minSNRlen}+ to be removed across {nThreads} '
-                'parallel processes and writing temporary files...')
+    # Get transcript starts if N/A for this specific length
+    if covLen not in tROC:
+        BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
+                                 includeIntrons)
+        tROC[covLen] = getTransEndSensSpec(covLen, bamfile, BLdata,
+                                           includeIntrons, getSensSpec = False)    
+    # Extract the transcript starts for this coverage length
+    eachTransStartByStrdRef = tROC[covLen][4]
+    # Load and, if relevant, pre-sort SNRs by len, strd & ref
     SNRsByLenStrdRef = loadPKL(out_SNRsByLenStrdRef)
     if minSNRlen is not None and not sortedSNRs:
         SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)
+    
+    logger.info(f'Identifying alignments {covLen:,d} bp upstream of non-'
+                f'terminal SNR{minSNRlen}+ to be removed across {nThreads} '
+                'parallel processes and writing temporary files...')
     # Create a pool of processes with shared variables
     pool = multiprocessing.pool(processes = nThreads,
                                 initializer = child_initialize,
@@ -376,24 +394,24 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
     if os.path.isfile(out_bamfile):
         logger.info(f'The filtered BAM file "{out_bamfile}" already exists.')
         return
-    
-    # Get transcript starts if N/A for this specific length
-    if covLen not in tROC:
-        BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
-                                 includeIntrons)
-        tROC[covLen] = getTransEndSensSpec(covLen, bamfile, BLdata,
-                                           includeIntrons, getSensSpec = False)    
-    # Extract the transcript starts for this coverage length
-    eachTransStartByStrdRef = tROC[covLen][4]
-    # Load and, if relevant, pre-sort SNRs by len, strd & ref
-    SNRsByLenStrdRef = loadPKL(out_SNRsByLenStrdRef)
-    if minSNRlen is not None and not sortedSNRs:
-        SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)
         
-    # Initialize the set of alignments to be removed (global var)
+    # Initialize the set of alignments to be removed
     toRemove = set()
     
     if nThreads is None:
+        # Get transcript starts if N/A for this specific length
+        if covLen not in tROC:
+            BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
+                                     includeIntrons)
+            tROC[covLen] = getTransEndSensSpec(covLen, bamfile, BLdata,
+                                               includeIntrons, getSensSpec = False)    
+        # Extract the transcript starts for this coverage length
+        eachTransStartByStrdRef = tROC[covLen][4]
+        # Load and, if relevant, pre-sort SNRs by len, strd & ref
+        SNRsByLenStrdRef = loadPKL(out_SNRsByLenStrdRef)
+        if minSNRlen is not None and not sortedSNRs:
+            SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)
+        
         logger.info(f'Identifying alignments {covLen:,d} bp upstream of non-'
                     f'terminal SNR{minSNRlen}+ to be removed in 1 serial '
                     'process...')
@@ -459,9 +477,9 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
         pool = MyPool(processes = 1)
         result = pool.apply_async(
             func = parallel_wrapper,
-            args = (eachTransStartByStrdRef, covLen, minSNRlen, bamfile,
-                    out_SNRsByLenStrdRef, out_bamfile, sortedSNRs, verbose,
-                    nThreads))
+            args = (covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
+                    out_transBaselineData, out_db, out_bamfile, tROC,
+                    includeIntrons, sortedSNRs, verbose, nThreads))
         # Close the pool
         pool.close()
         # Join the processes
