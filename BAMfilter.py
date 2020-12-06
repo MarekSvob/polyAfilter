@@ -9,7 +9,9 @@ import os
 import gc
 import pysam
 import logging
-from multiprocessing import Pool
+import concurrent.futures
+import multiprocessing
+import multiprocessing.pool
 
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
     sortSNRsByLenStrdRef
@@ -222,6 +224,92 @@ def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
     bamfile = _bamfile
     verbose = _verbose
     out_bamfile = _out_bamfile
+    
+
+class AngelProcess(multiprocessing.Process):
+    """Class for embedded parallel processes adapted from
+    https://stackoverflow.com/questions/6974695/python-process-pool-non-daemonic
+    """
+    def _get_daemon(self):
+        return False
+    def _set_daemon(self, value):
+        pass
+    daemon = property(_get_daemon, _set_daemon)
+
+
+class MyPool(multiprocessing.pool.Pool):
+    """Class for embedded parallel processes adapted from
+    https://stackoverflow.com/questions/6974695/python-process-pool-non-daemonic
+    """
+    Process = AngelProcess
+    
+
+def parallel_wrapper(eachTransStartByStrdRef, covLen, minSNRlen, bamfile,
+                     out_SNRsByLenStrdRef, out_bamfile, sortedSNRs, verbose,
+                     nThreads):
+    """Helper function to hold SNRsByLenStrdRef in RAM only temporarily.
+    
+    Parameters
+    ----------
+    eachTransStartByStrdRef : (dict)
+        { strd : { refName : [ ( (start, end), ... ) ] } } for start exon
+        pieces for each covered transcript.
+    covLen : (int)
+        The assumed distance between the beginning of alignment coverage and
+        the priming event.
+    minSNRlen : (int, None)
+        The shortest SNR length to consider. If None, remove all non-end
+        coverage.
+    bamfile : (str)
+        Location of the sorted and indexed bamfile to be filtered.
+    out_SNRsByLenStrdRef : (str)
+        Location of the SNRS to be loaded, such that:
+        { length : { strd : { ref : [ SNRs ] } } } or, alternatively when
+        sortedSNRs = False: { length : [ SNRs ] }
+    out_bamfile : (str, None)
+        Location of the resulting filtered bamfile. If None, the name of the
+        input bamfile name is used with '.filtered.bam' appended. The default
+        is None.
+    sortedSNRs : (bool)
+        Indicates whether the SNRs are already sorted by length, strd, and ref.
+    verbose : (bool)
+        Indicates whether extra messages are logged.
+    nThreads : (int),
+        Set the maximum number of threads to use. If None, serial processing is
+        used but not enforced (underlying processes may use multiple threads).
+
+    Returns
+    -------
+    strdRefs : list
+        [ (strd, ref) ]
+    """
+    
+    logger.info(f'Identifying alignments {covLen:,d} bp upstream of non-'
+                f'terminal SNR{minSNRlen}+ to be removed across {nThreads} '
+                'parallel processes and writing temporary files...')
+    SNRsByLenStrdRef = loadPKL(out_SNRsByLenStrdRef)
+    if minSNRlen is not None and not sortedSNRs:
+        SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)
+    # Create a pool of processes with shared variables
+    pool = multiprocessing.pool(processes = nThreads,
+                                initializer = child_initialize,
+                                initargs = (SNRsByLenStrdRef, covLen,
+                                            minSNRlen, bamfile, verbose,
+                                            out_bamfile))
+    # Identify the alignments to be removed by strand / ref
+    strdRefs = []
+    for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
+        for refName, eachTransStart in eachTransStartByRef.items():
+            strdRefs.append((strd, refName))
+            pool.apply_async(func = getAlignmentsToRemove,
+                             args = (strd, refName, eachTransStart))
+    # Close the pool
+    pool.close()
+    # Join the processes
+    pool.join()
+    
+    return strdRefs
+    
 
 def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
               out_transBaselineData, out_db, out_bamfile = None, tROC = {},
@@ -257,7 +345,8 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
         input bamfile name is used with '.filtered.bam' appended. The default
         is None.
     tROC : (dict), optional
-        { endLen : ( Sensitivity, Specificity, Accuracy ) }. The default is {}.
+        { endLen : ( TP, FN, TN, FP, eachTransStartByStrdRef ) }. The default
+        is {}.
     includeIntrons : (bool), optional
         Indicates whether to consider intron coverage. The default is False.
     cbFile : (str, None), optional
@@ -364,31 +453,21 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
         bam.close()
     
     else:
-        logger.info(f'Identifying alignments {covLen:,d} bp upstream of non-'
-                    f'terminal SNR{minSNRlen}+ to be removed across {nThreads}'
-                    ' parallel processes and writing temporary files...')
         # Set the number of threads for NumExpr (used by pandas & numpy)
         os.environ['NUMEXPR_MAX_THREADS'] = str(nThreads)
-        # Create a pool of processes with shared variables
-        pool = Pool(processes = nThreads,
-                    initializer = child_initialize,
-                    initargs = (SNRsByLenStrdRef, covLen, minSNRlen, bamfile,
-                                verbose, out_bamfile))
-        # Identify the alignments to be removed by strand / ref
-        strdRefs = []
-        for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
-            for refName, eachTransStart in eachTransStartByRef.items():
-                strdRefs.append((strd, refName))
-                pool.apply_async(func = getAlignmentsToRemove,
-                                 args = (strd, refName, eachTransStart))
+        # Start a single parallel process to get rid of 
+        pool = MyPool(processes = 1)
+        result = pool.apply_async(
+            func = parallel_wrapper,
+            args = (eachTransStartByStrdRef, covLen, minSNRlen, bamfile,
+                    out_SNRsByLenStrdRef, out_bamfile, sortedSNRs, verbose,
+                    nThreads))
         # Close the pool
         pool.close()
         # Join the processes
         pool.join()
-        
-        # Remove SNRsByLenStrdRef to free up RAM for the set of alingments
-        del SNRsByLenStrdRef
-        gc.collect()
+        # Obtain the list of strd-ref pairs processed
+        strdRefs = result.get()
         
         # Merge the temporary files into a single set & remove the files
         logger.info(f'Merging {len(strdRefs)} temporary files into memory and '
