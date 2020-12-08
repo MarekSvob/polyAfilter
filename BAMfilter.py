@@ -245,7 +245,8 @@ class MyPool(multiprocessing.pool.Pool):
 
 def parallel_wrapper(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
                      out_transBaselineData, out_db, out_bamfile, tROC,
-                     includeIntrons, sortedSNRs, verbose, nThreads):
+                     includeIntrons, sortedSNRs, weightedCov, verbose,
+                     nThreads):
     """Helper function to hold SNRsByLenStrdRef in RAM only temporarily.
     
     Parameters
@@ -279,6 +280,11 @@ def parallel_wrapper(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
         Indicates whether to consider intron coverage.
     sortedSNRs : (bool)
         Indicates whether the SNRs are already sorted by length, strd, and ref.
+    weightedCov : (bool)
+        Determines whether the covered bases are weighted by coverage amount
+        (i.e., coverage is summed). Alternatively, the sensitivity/specificity
+        relationship is purely binary (flat) and the covered bases (1) have the
+        same weight as non-covered ones (0).
     verbose : (bool)
         Indicates whether extra messages are logged.
     nThreads : (int),
@@ -294,9 +300,10 @@ def parallel_wrapper(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
     # Get transcript starts if N/A for this specific length
     if covLen not in tROC:
         BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
-                                 includeIntrons)
-        tROC[covLen] = getTransEndSensSpec(covLen, bamfile, BLdata,
-                                           includeIntrons, getSensSpec = False)    
+                                 includeIntrons, weightedCov = weightedCov)
+        tROC[covLen] = getTransEndSensSpec(
+            covLen, bamfile, BLdata, includeIntrons, getSensSpec = False,
+            weightedCov = weightedCov)    
     # Extract the transcript starts for this coverage length
     eachTransStartByStrdRef = tROC[covLen][4]
     # Load and, if relevant, pre-sort SNRs by len, strd & ref
@@ -331,7 +338,8 @@ def parallel_wrapper(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
 def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
               out_transBaselineData, out_db, out_bamfile = None, tROC = {},
               includeIntrons = False, cbFile = None, out_cbFile = None,
-              sortedSNRs = True, verbose = False, nThreads = None):
+              sortedSNRs = True, weightedCov = True, verbose = False,
+              nThreads = None):
     """Function that filters an indexed BAM file to remove non-canonical
     alignments that likely resulted from poly(dT) priming onto genomically
     encoded polyA single nucleotide repeats (SNRs), as opposed to mRNA polyA
@@ -375,6 +383,11 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
     sortedSNRs : (bool), optional
         Indicates whether the SNRs are already sorted by length, strd, and ref.
         The default is True.
+    weightedCov : (bool), optional
+        Determines whether the covered bases are weighted by coverage amount
+        (i.e., coverage is summed). Alternatively, the sensitivity/specificity
+        relationship is purely binary (flat) and the covered bases (1) have the
+        same weight as non-covered ones (0). The default is True.
     verbose : (bool), optional
         Indicates whether extra messages are logged. The default is False.
     nThreads : (int), optional
@@ -401,9 +414,10 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
         # Get transcript starts if N/A for this specific length
         if covLen not in tROC:
             BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
-                                     includeIntrons)
-            tROC[covLen] = getTransEndSensSpec(covLen, bamfile, BLdata,
-                                               includeIntrons, getSensSpec = False)    
+                                     includeIntrons, weightedCov = weightedCov)
+            tROC[covLen] = getTransEndSensSpec(
+                covLen, bamfile, BLdata, includeIntrons, getSensSpec = False,
+                weightedCov = weightedCov)    
         # Extract the transcript starts for this coverage length
         eachTransStartByStrdRef = tROC[covLen][4]
         # Load and, if relevant, pre-sort SNRs by len, strd & ref
@@ -472,18 +486,19 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
     else:
         # Set the number of threads for NumExpr (used by pandas & numpy)
         os.environ['NUMEXPR_MAX_THREADS'] = str(nThreads)
-        # Start a single parallel process to get rid of 
+        # Start 1 parallel process to load SNRsByLenStrdRef only temporarily
         pool = MyPool(processes = 1)
         result = pool.apply_async(
             func = parallel_wrapper,
             args = (covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
                     out_transBaselineData, out_db, out_bamfile, tROC,
-                    includeIntrons, sortedSNRs, verbose, nThreads))
+                    includeIntrons, sortedSNRs, weightedCov, verbose, nThreads))
         # Close the pool
         pool.close()
         # Join the processes
         pool.join()
-        # Obtain the list of strd-ref pairs processed
+        # Obtain the list of strd-ref pairs processed; also helps uncover any
+        #  exceptions that came up during that process
         strdRefs = result.get()
         
         # Merge the temporary files into a single set & remove the files

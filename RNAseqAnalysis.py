@@ -610,9 +610,10 @@ def getNonCanCovGenes(out_NonCanCovGenes, lenToSNRs, out_db, bamfile,
     return nonCanCovGenes
 
 
-def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons):
+def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons,
+                    weightedCov = True):
     """Function to obtain the baseline reference data (covered transcripts and
-    total TP/TN) as an input for laster calculations of sensitivity &
+    total TP/TN) as an input for faster calculations of sensitivity &
     specificity at each given end length. Note that here, only expressed (i.e.,
     with any coverage) transcripts are considered.
     
@@ -627,6 +628,11 @@ def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons):
     includeIntrons : (bool)
         Whether (positive or negative) coverage of introns should also be
         considered.
+    weightedCov : (bool), optional
+        Determines whether the covered bases are weighted by coverage amount
+        (i.e., coverage is summed). Alternatively, the sensitivity/specificity
+        relationship is purely binary (flat) and the covered bases (1) have the
+        same weight as non-covered ones (0). The default is True.
     
     Returns
     -------
@@ -634,7 +640,8 @@ def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons):
         { strd : { ref : [ Transcript ] } } of transcripts with non-0 exonic
         coverage.
     Pos : (int)
-        Total coverage across all flattened exons from covered transcripts.
+        Total coverage across all flattened exons (if weightedCov, otherwise
+        only number of exon bps with any coverage) from covered transcripts.
     Neg : (int)
         Total number of exon bps with no coverage from covered transcripts.
     """
@@ -724,8 +731,9 @@ def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons):
                                                      read_callback = lambda r:
                                                          r.is_reverse != strd),
                                   axis = 0)
-                Pos += np.sum(pieceCov)
-                Neg += len(pieceCov) - np.count_nonzero(pieceCov)
+                flatCov = np.count_nonzero(pieceCov)
+                Pos += np.sum(pieceCov) if weightedCov else flatCov
+                Neg += len(pieceCov) - flatCov
     
     bam.close()
     savePKL(out_transBaselineData, (covTransByStrdRef, Pos, Neg))
@@ -827,7 +835,7 @@ def getTransStartEnding(exons, endLength, strd):
     
     
 def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
-                        getSensSpec = True):
+                        getSensSpec = True, weightedCov = True):
     """Function to provide data for a ROC curve across various transcript end
     lengths.
     
@@ -839,28 +847,33 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
         Path to the (filtered) bam file.
     BLdata : (tuple)
         Baseline data needed for Sens & Spec calulations, such that
-        ( { strd : { ref : [ Transcript ] } }, { strd : { ref : [ exon ] } },
-         Pos, Neg )
+        ( { strd : { ref : [ Transcript ] } }, Pos, Neg )
     includeIntrons : (bool)
         Whether (positive or negative) coverage of introns should also be
         considered.
-    getSensSpec : (bool)
+    getSensSpec : (bool)m optional
         Whether to calculate the Sens/Spec data. The default is True.
+    weightedCov : (bool), optional
+        Determines whether the covered bases are weighted by coverage amount
+        (i.e., coverage is summed). Alternatively, the sensitivity/specificity
+        relationship is purely binary (flat) and the covered bases (1) have the
+        same weight as non-covered ones (0). The default is True.
 
     Returns
     -------
     TP : (int)
-        The true positive rate of RNAseq coverage (sum of coverage depth
-        across bps) of transcript starts.
+        The true positive rate of RNAseq coverage in transcript starts (total
+        coverage if weightedCov, otherwise only number of bps with coverage).
     FN : (int)
-        The false negative rate of RNAseq coverage (sum of coverage depth
-        across bps) of transcript starts. [Pos baseline for transStarts.]
+        The false negative rate of RNAseq coverage in transcript starts (total
+        coverage if weightedCov, otherwise only number of bps with coverage).
+        [Pos baseline for transStarts.]
     TN : (int)
-        The true negative rate of RNAseq coverage (sum of bps with no coverage)
-        of transcript starts. [Neg baseline for transStarts.]
+        The true negative rate of RNAseq coverage of transcript starts (sum of
+        bps with no coverage). [Neg baseline for transStarts.]
     FP : (int)
-        The false positive rate of RNAseq coverage (sum of coverage depth
-        across bps) of transcript starts.
+        The false positive rate of RNAseq coverage of transcript starts (sum
+        of bps with no coverage).
     eachTransStartByStrdRef : (dict)
         { strd : { refName : [ ( (start, end), ... ) ] } } for start exon
         pieces for each covered transcript.
@@ -952,8 +965,9 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
                                            read_callback = lambda r:
                                                r.is_reverse != strd),
                             axis = 0)
-                    TP += np.sum(endsCov)
-                    FP += len(endsCov) - np.count_nonzero(endsCov)
+                    flatCov = np.count_nonzero(endsCov)
+                    TP += np.sum(endsCov) if weightedCov else flatCov
+                    FP += len(endsCov) - flatCov
     
     bam.close()
     # Calculate the results
@@ -1002,8 +1016,9 @@ def keyVal(key, d, meth):
 
 def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
                    endLenLo, endLenHi, tROC = {}, optMeth = 'Youden',
-                   includeIntrons = False, endLenMax = 1000):
-    """A gradient descent-like wrapper funciton around getTransEndSensSpec() to
+                   includeIntrons = False, endLenMax = 1000,
+                   weightedCov = True):
+    """A gradient descent-like wrapper function around getTransEndSensSpec() to
     manage result generation & collection. This function maximizes the function
     given by optMeth across exon-wise transcript endLengths. This function
     assumes that there is only one such local maximum. (!) Also note that while
@@ -1032,7 +1047,12 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     includeIntrons : (bool), optional
         Indicates whether to consider intron coverage. The default is False.
     endLenMax : (int), optional
-        Indicates what is the maximum 
+        Indicates the maximum endLen to consider
+    weightedCov : (bool), optional
+        Determines whether the covered bases are weighted by coverage amount
+        (i.e., coverage is summed). Alternatively, the sensitivity/specificity
+        relationship is purely binary (flat) and the covered bases (1) have the
+        same weight as non-covered ones (0). The default is True.
 
     Returns
     -------
@@ -1051,7 +1071,7 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     
     # Get the baseline data
     BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
-                             includeIntrons)
+                             includeIntrons, weightedCov)
     
     # Start with min, mid, and max and then apply the repetitive algorithm
     #  until 'covergence'
@@ -1060,7 +1080,7 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
                    endLenHi):
         if endLen not in tROC:
             tROC[endLen] = getTransEndSensSpec(endLen, bamfile, BLdata,
-                                               includeIntrons)
+                                               includeIntrons, weightedCov)
         
     # Always look at the midpoint between the endLen with the largest
     #  Sens*Spec product and an adjacent endLen, alternating above or below.
@@ -1119,7 +1139,7 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
             checkedJustBelowAbove[lookAbove] = True
         else:
             tROC[lenToC] = getTransEndSensSpec(lenToC, bamfile, BLdata,
-                                               includeIntrons)
+                                               includeIntrons, weightedCov)
     
     logger.info(f'The final optimal end length is {optLen}.')
     # Saving the results; note that this may rewrite a previously saved file
@@ -1154,7 +1174,7 @@ def sortSNRsByLenStrdRef(lenToSNRs):
 
 
 def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
-                 optMeth = 'Youden', sortedSNRs = True):
+                 optMeth = 'Youden', sortedSNRs = True, weightedCov = True):
     """This alhorithm goes over ALL SNR lengths exactly once to determine the
     sensitivity and specificity of coverage captured by the SNR pieces. This is
     different from the transcript end algorithm, where there are many more
@@ -1182,6 +1202,11 @@ def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
     sortedSNRs : (bool)
         Indicates whether the SNRs are already sorted by length, strd, and ref.
         The default is True.
+    weightedCov : (bool), optional
+        Determines whether the covered bases are weighted by coverage amount
+        (i.e., coverage is summed). Alternatively, the sensitivity/specificity
+        relationship is purely binary (flat) and the covered bases (1) have the
+        same weight as non-covered ones (0). The default is True.
 
     Returns
     -------
@@ -1267,8 +1292,9 @@ def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
                                                r.is_reverse != strd),
                         axis = 0)
                     # Adjust the TP & TN accordingly
-                    TP += np.sum(pieceCov)
-                    FP += len(pieceCov) - np.count_nonzero(pieceCov)
+                    flatCov = np.count_nonzero(pieceCov)
+                    TP += np.sum(pieceCov) if weightedCov else flatCov
+                    FP += len(pieceCov) - flatCov
                 # Add the newSNRpieces to those from previous SNR lengths
                 SNRpiecesByStrdRef[strd][refName].extend(newSNRpieces)
                 # Flatten the SNRs (should contain no overlaps, only adjacency)
@@ -1297,7 +1323,7 @@ def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
 
 
 def getSNRcovByTrans(SNRsByLenStrdRef, tROC, out_snrROC, bamfile,
-                     optMeth = 'Youden', sortedSNRs = True):
+                     optMeth = 'Youden', sortedSNRs = True, weightedCov = True):
     """This function gets Sensitivity & Specificity of coverage accounted for
     by SNRs in expressed transcript starts (defined by the tROC), in which they
     occur. This is an alternative to getSNREndROC().
@@ -1318,6 +1344,11 @@ def getSNRcovByTrans(SNRsByLenStrdRef, tROC, out_snrROC, bamfile,
     sortedSNRs : (bool)
         Indicates whether the SNRs are already sorted by length, strd, and ref.
         The default is True.
+    weightedCov : (bool), optional
+        Determines whether the covered bases are weighted by coverage amount
+        (i.e., coverage is summed). Alternatively, the sensitivity/specificity
+        relationship is purely binary (flat) and the covered bases (1) have the
+        same weight as non-covered ones (0). The default is True.
         
     Returns
     -------
@@ -1433,8 +1464,9 @@ def getSNRcovByTrans(SNRsByLenStrdRef, tROC, out_snrROC, bamfile,
                                                r.is_reverse != strd),
                         axis = 0)
                     # Adjust the TP & FP accordingly
-                    TP += np.sum(pieceCov)
-                    FP += np.count_nonzero(pieceCov == 0)
+                    flatCov = np.count_nonzero(pieceCov)
+                    TP += np.sum(pieceCov) if weightedCov else flatCov
+                    FP += len(pieceCov) - flatCov
                 # Itegrate the ovSNRpieces into the aggregate dict & flatten
                 SNRpiecesByStrdRef[strd][refName].extend(ovSNRpieces)
                 SNRpiecesByStrdRef[strd][refName] = flattenIntervals(
@@ -1457,8 +1489,9 @@ def getSNRcovByTrans(SNRsByLenStrdRef, tROC, out_snrROC, bamfile,
                                                r.is_reverse != strd),
                         axis = 0)
                     # Adjust the Pos & Neg accordingly
-                    Pos += np.sum(tCov)
-                    Neg += np.count_nonzero(tCov == 0)
+                    flatCov = np.count_nonzero(tCov)
+                    Pos += np.sum(tCov) if weightedCov else flatCov
+                    Neg += len(tCov) - flatCov
                 # Itegrate the newTstarts into the aggregate dict & flatten
                 flatTransStartsByStrdRef[strd][refName].extend(newTstarts)
                 flatTransStartsByStrdRef[strd][refName] = flattenIntervals(
@@ -1483,7 +1516,8 @@ def getSNRcovByTrans(SNRsByLenStrdRef, tROC, out_snrROC, bamfile,
 
 
 def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
-                   out_transBaselineData, bamfile, includeIntrons = False):
+                   out_transBaselineData, bamfile, includeIntrons = False,
+                   weightedCov = True):
     """Function to get several statistics in order to calculate correlation
     between gene coverage & SNR content. Specifically, it goes over all genes
     and for each gene, it measures its RNA-seq coverage. If > 0, it also gets
@@ -1510,6 +1544,13 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
         Path to the saved baseline data.
     bamfile : (str)
         Location of the bamfile to be scanned.
+    includeIntrons : (bool), optional
+        Indicates whether to consider intron coverage. The default is False.
+    weightedCov : (bool), optional
+        Determines whether the covered bases are weighted by coverage amount
+        (i.e., coverage is summed). Alternatively, the sensitivity/specificity
+        relationship is purely binary (flat) and the covered bases (1) have the
+        same weight as non-covered ones (0). The default is True.
 
     Returns
     -------
@@ -1529,7 +1570,7 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
     SNRsByGeneLen = getSNRsByGeneLen(lenToSNRs, concordant = True)
     # Get the list of covered transcripts by strd & ref
     BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
-                             includeIntrons)
+                             includeIntrons, weightedCov)
     covTransByStrdRef = BLdata[0]
     # Sort the covered transcripts by geneID
     covTransByGene = defaultdict(list)
