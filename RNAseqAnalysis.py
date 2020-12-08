@@ -1071,7 +1071,7 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     
     # Get the baseline data
     BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
-                             includeIntrons, weightedCov)
+                             includeIntrons, weightedCov = weightedCov)
     
     # Start with min, mid, and max and then apply the repetitive algorithm
     #  until 'covergence'
@@ -1079,8 +1079,9 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
                    np.mean((endLenLo, endLenHi), dtype = int),
                    endLenHi):
         if endLen not in tROC:
-            tROC[endLen] = getTransEndSensSpec(endLen, bamfile, BLdata,
-                                               includeIntrons, weightedCov)
+            tROC[endLen] = getTransEndSensSpec(
+                endLen, bamfile, BLdata, includeIntrons,
+                weightedCov = weightedCov)
         
     # Always look at the midpoint between the endLen with the largest
     #  Sens*Spec product and an adjacent endLen, alternating above or below.
@@ -1138,8 +1139,9 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
                         'has already been checked.')
             checkedJustBelowAbove[lookAbove] = True
         else:
-            tROC[lenToC] = getTransEndSensSpec(lenToC, bamfile, BLdata,
-                                               includeIntrons, weightedCov)
+            tROC[lenToC] = getTransEndSensSpec(
+                lenToC, bamfile, BLdata, includeIntrons,
+                weightedCov = weightedCov)
     
     logger.info(f'The final optimal end length is {optLen}.')
     # Saving the results; note that this may rewrite a previously saved file
@@ -1570,7 +1572,7 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
     SNRsByGeneLen = getSNRsByGeneLen(lenToSNRs, concordant = True)
     # Get the list of covered transcripts by strd & ref
     BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
-                             includeIntrons, weightedCov)
+                             includeIntrons, weightedCov = weightedCov)
     covTransByStrdRef = BLdata[0]
     # Sort the covered transcripts by geneID
     covTransByGene = defaultdict(list)
