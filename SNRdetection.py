@@ -505,8 +505,8 @@ def howLongSince(t_start):
     # Save how much has elapsed (in seconds)
     t_diff = time.time() - t_start
     
-    logger.info(f'{t_diff//(60*60):d}h:{(t_diff%(60*60))//60:d}m:'
-                f'{t_diff%60:d}s elapsed.')
+    logger.info(f'{t_diff//(60*60)}h:{(t_diff%(60*60))//60}m:'
+                f'{t_diff%60}s elapsed.')
 
 
 def collectResult(result):
@@ -543,8 +543,8 @@ def collectResult(result):
     t_since = time.time() - timeStart
     t_left = t_since/processed * (totalPieces - processed)
     logger.info(f'Processed {processed:,d} / {totalPieces:,d} ('
-                f'{processed/totalPieces:.2%}) splits in {t_since//(60*60):d}h'
-                f':{(t_since%(60*60))//60:d}m:{t_since%60}s. Time remaining: ~'
+                f'{processed/totalPieces:.2%}) splits in {t_since//(60*60)}h'
+                f':{(t_since%(60*60))//60}m:{t_since%60}s. Time remaining: ~'
                 f'{t_left//(60*60)}h:{(t_left%(60*60))//60}m:{t_left%60}s.')
     
     
