@@ -1007,7 +1007,7 @@ def keyVal(key, d, meth):
               'Youden': lambda TP, FN, TN, FP: TP/(TP+FN) + TN/(TN+FP) - 1,
               'MCC': lambda TP, FN, TN, FP:
                   (TP*TN - FP*FN) / 
-                  np.sqrt(int((TP + FN) * (TP + FP) * (TN + FP) * (TN + FN))) }
+                  np.sqrt(float((TP+FN) * (TP+FP) * (TN+FP) * (TN+FN))) }
     val = switch[meth](*d[key][:4])
     if np.isnan(val):
         val = 0
