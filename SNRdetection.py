@@ -116,7 +116,8 @@ def getGenomeLength(fasta):
 
 def getPieces(base, fasta, cpus, cFR):
     """Function that organizes the genome into pieces of lengths following a
-    uniform distribution.
+    uniform distribution, based on the number of cpus that will be processing
+    them.
 
     Parameters
     ----------
@@ -362,14 +363,16 @@ def findSNRsWMism(base, piece, minSNRlen = 5, verbose = False,
     """A faster version of findSNRs w/o any database lookup (of featureTypes
     or genes), with 1 mismatch allowed in a non-terminal position. Note that 2
     SNRs with 1 mismatch each may overlap if they constitute of 3 blocks
-    separated by 2 single bp mismatches.
+    separated by 2 single bp mismatches. This function is meant to run once for
+    each processing thread.
 
     Parameters
     ----------
     base : (str)
         DNA base constituting SNRs to be searched for: "A", "T", "C", "G", "N"
     piece : (list)
-        A list of splits, such that: [ (record, start, sequence) ]
+        A list of splits produced by getPieces(), such that:
+            [ (record, start, sequence) ]
     minSNRlen : (int)
         The minimal length of the SNRs saved; limited to save storage space
         needed.

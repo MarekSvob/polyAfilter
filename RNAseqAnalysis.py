@@ -13,6 +13,7 @@ import numpy as np
 from collections import defaultdict
 from IPython.display import clear_output
 from functools import partial
+from sklearn import metrics
 
 from SNRanalysis import getFlatFeatsByTypeStrdRef, getSNRsByGeneLen, \
     flattenIntervals, getOverlaps, removeOverlaps
@@ -986,8 +987,7 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
 def keyVal(key, d, meth):
     """A helper function for finding a maximum ROC point according to the
     specified optimizing function. In practice, used as a partial function with
-    'key' as the missing arg. Methods (other than 'product') taken from Berrar,
-    2019 (DOI: 10.1016/B978-0-12-809633-8.20351-8).
+    'key' as the missing arg.
     
     Parameters
     ----------
@@ -1003,12 +1003,61 @@ def keyVal(key, d, meth):
     val : (float)
         The value assigned to this dict key based on the method used.
     """
-    switch = {'product': lambda TP, FN, TN, FP: TP/(TP+FN) * TN/(TN+FP),
-              'Youden': lambda TP, FN, TN, FP: TP/(TP+FN) + TN/(TN+FP) - 1,
-              'MCC': lambda TP, FN, TN, FP:
-                  (TP*TN - FP*FN) / 
-                  np.sqrt(float((TP+FN) * (TP+FP) * (TN+FP) * (TN+FN))) }
-    val = switch[meth](*d[key][:4])
+    
+    TP, FN, TN, FP = d[key][:4]
+    
+    # Methods from Berrar, 2019 (DOI: 10.1016/B978-0-12-809633-8.20351-8)
+    if meth == 'accuracy':
+        val = (TP+TN) / (TP+FP+FN+TN)
+    
+    elif meth == 'Youden':
+        val = TP/(TP+FN) + TN/(TN+FP) - 1
+        
+    elif meth == 'LR+':
+        val = TP/(TP+FN) / (1 - TN/(TN+FP))
+    
+    elif meth == 'LR-':
+        val = (1 - TP/(TP+FN)) / (TN/(TN+FP))
+        
+    elif meth == 'BACC':
+        val = (TP/(TP+FN) + TN/(TN+FP)) / 2
+        
+    elif meth == 'F':
+        val = 2 * (1/(1/(TP/(TP+FP)) + 1/(TP/(TP+FN))))
+        
+    elif meth == 'G':
+        val = np.sqrt(TP/(TP+FP) * TP/(TP+FN))
+        
+    elif meth == 'MCC':
+        val = ((TP*TN - FP*FN) /
+               np.sqrt(float((TP+FN) * (TP+FP) * (TN+FP) * (TN+FN))))
+    
+    # Methods from Unal, 2017 (DOI: 10.1155/2017/3762651)
+    elif meth == 'product':
+        val = TP/(TP+FN) * TN/(TN+FP)
+    
+    elif meth == 'ER':
+        val = -np.sqrt((1-TP/(TP+FN))**2 + (1-TN/(TN+FP))**2)
+    
+    elif meth == 'IU':
+        fpr = [1 - d[k][2]/(d[k][2] + d[k][3]) for k in sorted(d)]
+        tpr = [d[k][0]/(d[k][0] + d[k][1]) for k in sorted(d)]
+        AUC = metrics.auc(x = [0] + fpr + [1], y = [0] + tpr + [1])
+        val = -(abs(TP/(TP+FN) - AUC) + abs(TN/(TN+FP) - AUC))
+        
+    # From https://ncss-wpengine.netdna-ssl.com/wp-content/themes/ncss/pdf/
+    #  Procedures/NCSS/One_ROC_Curve_and_Cutoff_Analysis.pdf
+    elif meth == 'DOR':
+        val = (TP/(TP+FN))/(1 - TN/(TN+FP)) / ((1 - TP/(TP+FN))/(TN/(TN+FP)))
+    
+    # Simplified IU, independent of AUC
+    elif meth == 'diag':
+        val = -abs(TP/(TP+FN) - TN/(TN+FP))
+    
+    else:
+        raise ValueError('The method has to be one of the following:\n'
+                         '"accuracy", "Youden", "LR+", "LR-", "BACC", "F", '
+                         '"G", "MCC", "product", "ER", "IU", "DOR", "diag"')
     if np.isnan(val):
         val = 0
     
@@ -1101,7 +1150,8 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
         checkedLens = sorted(tROC)
         # Get the current most optimal endLen using the J statistic or product
         optLen = max(tROC, key = partial(keyVal, d = tROC, meth = optMeth))
-        logger.info(f'The current optimal end length by {optMeth} is {optLen}.')
+        logger.info('The current optimal end length by '
+                    f'{optMeth} is {optLen}.')
         # Settings in the special case when the endLenMax is reached
         if optLen == endLenMax:
             lookAbove = False
@@ -1283,7 +1333,7 @@ def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
                 newSNRpieces = getOverlaps(newSNRpieces, transStarts)
                 # Remove already covered areas so only new ones are measured
                 newSNRpieces = removeOverlaps(
-                    newSNRpieces, SNRpiecesByStrdRef[strd][refName])                
+                    newSNRpieces, SNRpiecesByStrdRef[strd][refName])
                 # Measure the coverage of the new pieces only
                 for pStart, pEnd in newSNRpieces:
                     pieceCov = np.sum(
@@ -1326,7 +1376,8 @@ def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
 
 
 def getSNRcovByTrans(SNRsByLenStrdRef, tROC, out_snrROC, bamfile,
-                     optMeth = 'Youden', sortedSNRs = True, weightedCov = True):
+                     optMeth = 'Youden', sortedSNRs = True,
+                     weightedCov = True):
     """This function gets Sensitivity & Specificity of coverage accounted for
     by SNRs in expressed transcript starts (defined by the tROC), in which they
     occur. This is an alternative to getSNREndROC().

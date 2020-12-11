@@ -114,7 +114,8 @@ def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
 
 def getAlignmentsToRemove(strd, refName, eachTransStart):
     """Helper function to run on each thread for a multithreaded alignment
-    identification and write as temporary files to be merged later.
+    identification and write as temporary files to be merged later. Note that
+    some of the variables used are set to be global by child_initialize().
     
     strd : (bool)
         Strand of the reference; +(True) / -(False)
@@ -190,7 +191,8 @@ def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
                      _verbose, _out_bamfile):
     """Helper function to initialize and share variables between parallel
     processes. Taken from
-    https://stackoverflow.com/questions/25825995/python-multiprocessing-only-one-process-is-running
+    https://stackoverflow.com/questions/25825995/
+    python-multiprocessing-only-one-process-is-running
     
     Parameters
     ----------
@@ -227,7 +229,8 @@ def child_initialize(_SNRsByLenStrdRef, _covLen, _minSNRlen, _bamfile,
 
 class AngelProcess(multiprocessing.Process):
     """Class for embedded parallel processes adapted from
-    https://stackoverflow.com/questions/6974695/python-process-pool-non-daemonic
+    https://stackoverflow.com/questions/6974695/
+    python-process-pool-non-daemonic
     """
     def _get_daemon(self):
         return False
@@ -238,7 +241,8 @@ class AngelProcess(multiprocessing.Process):
 
 class MyPool(multiprocessing.pool.Pool):
     """Class for embedded parallel processes adapted from
-    https://stackoverflow.com/questions/6974695/python-process-pool-non-daemonic
+    https://stackoverflow.com/questions/6974695/
+    python-process-pool-non-daemonic
     """
     Process = AngelProcess
     

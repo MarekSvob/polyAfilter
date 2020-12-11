@@ -51,19 +51,24 @@ def getBaseComp(out_bases, fasta = None, showGC = True):
     # Load the bases dictionary, if available
     if os.path.isfile(out_bases):
         bases = loadPKL(out_bases)
-        return bases
-    # Otherwise, scan the genome to create it
-    bases = collections.defaultdict(int)
-
-    logger.info('Scanning the genome for base composition...')
-    # Make sure that the fasta file is open only temporarily
-    with open(fasta, 'r') as genome:
-        # Go over each base in each record in the genome and count each
-        for record in SeqIO.parse(genome, "fasta"):
-            for base in record.seq:
-                bases[base] += 1
-    # Save the bases
-    savePKL(out_bases, bases)
+    else:
+        if fasta is None:
+            raise ValueError('A path to either a fasta file or a valid '
+                             'pre-calculated base composition file needs to be'
+                             ' provided.')
+        # Otherwise, scan the genome to create it
+        bases = collections.defaultdict(int)
+    
+        logger.info('Scanning the genome for base composition...')
+        # Make sure that the fasta file is open only temporarily
+        with open(fasta, 'r') as genome:
+            # Go over each base in each record in the genome and count each
+            for record in SeqIO.parse(genome, "fasta"):
+                for base in record.seq:
+                    bases[base] += 1
+        # Save the bases
+        savePKL(out_bases, bases)
+    
     # Optionally, show the GC% content of this genome
     if showGC:
         gc = bases['C'] + bases['c'] + bases['G'] + bases['g']
@@ -187,8 +192,8 @@ def SNRfeatureSets(lenToFeats):
     
     Parameters
     ----------
-    lengthToSNRs : (dict)
-        The dict of SNRs detected, sorted by length.
+    lenToFeats : (dict)
+        { length : { { feature } : count } }
 
     Returns
     -------
@@ -197,7 +202,7 @@ def SNRfeatureSets(lenToFeats):
         former in the latter is expressed as a bool.
     """
     
-    # Get the set of (frozen)sets of features represented among the SNRs
+    # Get the list of (frozen)sets of features represented among the SNRs
     featureSets = list({s for c in lenToFeats.values() for s in c.keys()})
     # Flatten this set of features represented
     features = list({f for featureSet in featureSets for f in featureSet})
