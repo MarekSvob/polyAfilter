@@ -33,21 +33,15 @@ totalPieces = 0
 processed = 0
 timeStart = None
 
-# A dictionary of letters to avoid for splitting, given the base sought
-avoidSplits = {'A':('a', 'A', 't', 'T'),
-               'T':('a', 'A', 't', 'T'),
-               'C':('c', 'C', 'g', 'G'),
-               'G':('c', 'C', 'g', 'G')}
-
 # Dict of complementary bases
 compDict = {'A':'T', 'T':'A', 'C':'G', 'G':'C', 'N':'N'}
 
 # Handling of non-caps in the sequence
-capsDict = {'A':('a', 'A'),
-            'T':('t', 'T'),
-            'C':('c', 'C'),
-            'G':('g', 'G'),
-            'N':'N'}
+capsDict = {'A':{'a', 'A'},
+            'T':{'t', 'T'},
+            'C':{'c', 'C'},
+            'G':{'g', 'G'},
+            'N':{'n', 'N'}}
 
 
 class SNR:
@@ -64,7 +58,7 @@ class SNR:
         self.record = record    # str, record (chromosome) where SNR is found
         self.start = start      # int, start of the SNR locus
         self.end = end          # int, end of the SNR locus
-        self.mism = mism        # int, position of a mismatch (0 when None)
+        self.mism = mism        # tuple, absolute positions of mismatches
         self.strand = strand    # bool: T (+) or F (-)
         self.concFeats = cFeats # set, GFFdb features on the respective strand,
         self.discFeats = dFeats #  such as region, gene, exon, transcript, etc.
@@ -114,15 +108,19 @@ def getGenomeLength(fasta):
     return genomeLengths[fasta]
 
 
-def getPieces(base, fasta, cpus, cFR):
+def getPieces(base, mism, fasta, cpus, cFR):
     """Function that organizes the genome into pieces of lengths following a
     uniform distribution, based on the number of cpus that will be processing
-    them.
+    them. The pieces can only be split where a potential SNR may not be found,
+    i.e., after a contiguous strech of mism+1 non-bases.
+    (Note: may become impractical for a higher # of mismatches.)
 
     Parameters
     ----------
     base : (str)
         The DNA base to comprise the SNRs.
+    mism : (int)
+        The maximum number of mismatches in the SNRs.
     fasta : (str)
         Reference to the FASTA file with the reference sequence.
     cpus : (int)
@@ -134,8 +132,9 @@ def getPieces(base, fasta, cpus, cFR):
     Returns
     -------
     allPieces : (list)
-        List that contains all the pieces (lists), each piece containing
-        multiple slices (tuples), such that [ [ (recordID, start, seq) ] ].
+        List of all the pieces (lists), each piece containing multiple slices
+        (tuples), such that [ [ (recordID, start, seq) ] ]. Each piece is to be
+        processed by a separate thread when detecting SNRs.
     """
     
     # Grab global variable to be changed in the course of this function
@@ -159,14 +158,17 @@ def getPieces(base, fasta, cpus, cFR):
             piece = []
             pieceLen = 0
             unit = randint(*ran)
-    
+            
+    # A dictionary of letters to avoid for splitting, given the base sought
+    avoidSplits = {'A':{'a', 'A', 't', 'T'}, 'T':{'a', 'A', 't', 'T'},
+                   'C':{'c', 'C', 'g', 'G'}, 'G':{'c', 'C', 'g', 'G'}}
     # Set the bases to avoid for splitting
     avoid = avoidSplits[base]
     # Get the genome length
     genLen = getGenomeLength(fasta)
     
     # Initiate the range of piece sizes as a reusable tuple (which is a range
-    #  of pre-set franctions of the genome divided by the # of cpus) & announce
+    #  of pre-set fractions of the genome divided by the # of cpus) & announce
     ran = (genLen//(cFR[0]*cpus), genLen//(cFR[1]*cpus))
     logger.info('Each piece will contain between '
                 f'{ran[0]:,d} and {ran[1]:,d} bp...')
@@ -184,16 +186,27 @@ def getPieces(base, fasta, cpus, cFR):
             first = 0
             last = unit - pieceLen
             chLen = len(ch.seq)
+            # Initiate the counter of sequential non-bases
+            nonBLen = 0
             # Keep adding slices until 'last' has exceeded the record length
             while last < chLen:
-                # If the current last base is one to be avoided, move on
+                # If the current last base is to be avoided (SNR base), move on
+                #  and reset the sequential nonB counter
                 if ch.seq[last] in avoid:
                     last += 1
+                    nonBLen = 0
+                # If the # of previously identified sequential non-bases is
+                #  less than allowed mismatches (& now it may be =), keep going
+                elif nonBLen < mism:
+                    last += 1
+                    nonBLen += 1
                 # Otherwise add the piece & reset the frame of the next slice
                 else:
                     addSlice() 
                     first = last
                     last += unit - pieceLen
+                    # Reset the counter of sequential non-bases
+                    nonBLen = 0
             # Once the end of the record is reached, add the last piece and
             #  move on to the next record
             last = chLen
@@ -207,14 +220,14 @@ def getPieces(base, fasta, cpus, cFR):
     totalPieces = len(allPieces)
     # Sort the pieces in place by their total length, largest to smallest
     logger.info(f'Sorting {totalPieces:,} pieces by the total number of bp...')
-    allPieces.sort(key = lambda x: sum([len(i[2]) for i in x]), reverse = True)
+    allPieces.sort(key = lambda p: sum([len(s[2]) for s in p]), reverse = True)
     
     return allPieces
 
     
 def findSNRs(base, piece, db_out, temp, minFeatLen, minSNRlen):
     """Function to scan a given reference sequence (range) & find unique SNRs
-    of given base type and length.
+    of given base type and length (without mismatches).
     
     Parameters
     ----------
@@ -342,7 +355,7 @@ def findSNRs(base, piece, db_out, temp, minFeatLen, minSNRlen):
                         # If the SNR is large enough, add the SNR to the dict
                         if length >= minSNRlen:
                             lenToSNRs[length].append(
-                                SNR(base, s[0], s[1] + first, s[1] + last, 0,
+                                SNR(base, s[0], s[1] + first, s[1] + last, (),
                                     b == base, *elems))
                         # For each SNR, break the for-loop so that if 'base'
                         #  was found in the first position of the SNR, 'cBase'
@@ -356,10 +369,10 @@ def findSNRs(base, piece, db_out, temp, minFeatLen, minSNRlen):
     return lenToSNRs, lenToSNRcounts, lenToConcFeats, lenToDiscFeats
 
 
-def findSNRsWMism(base, piece, minSNRlen = 5, verbose = False,
-                  SNRsByLenStrdRef = collections.defaultdict(
-                      lambda: collections.defaultdict(
-                          lambda: collections.defaultdict(list)))):
+def findSNRsW1mism(base, piece, minSNRlen = 5, verbose = False,
+                   SNRsByLenStrdRef = collections.defaultdict(
+                       lambda: collections.defaultdict(
+                           lambda: collections.defaultdict(list)))):
     """A faster version of findSNRs w/o any database lookup (of featureTypes
     or genes), with 1 mismatch allowed in a non-terminal position. Note that 2
     SNRs with 1 mismatch each may overlap if they constitute of 3 blocks
@@ -453,7 +466,7 @@ def findSNRsWMism(base, piece, minSNRlen = 5, verbose = False,
                             strd = b == base
                             SNRsByLenStrdRef[length][strd][ref].append(
                                 SNR(base, ref, bp0 + first, bp0 + last,
-                                    mism - first, strd, set(), {}, set(), {}))
+                                    (bp0 + mism,), strd, set(), {}, set(), {}))
                         
                         # If there was only 1 match after the mismatch, start
                         #  checking for the next SNR at the site of mismatch
@@ -488,6 +501,115 @@ def findSNRsWMism(base, piece, minSNRlen = 5, verbose = False,
         if verbose:
             logger.info('Search for SNRs with 1 mismatch on reference'
                         f' "{ref}" finished @ bp {first:,d}.')
+    
+    return SNRsByLenStrdRef
+
+
+def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
+                   SNRsByLenStrdRef = collections.defaultdict(
+                       lambda: collections.defaultdict(
+                           lambda: collections.defaultdict(list)))):
+    """A universal detection of SNRs of maximum length with a given number of
+    mismatches allowed in non-terminal positions. This function is meant to run
+    once per processing thread. Conceptually, once the maximum # of mismatches
+    is encountered after at least 1 block of bases, and the total sum of bases
+    in the current block(s) is higher than minSNRlen, a new SNR is added.
+
+    Parameters
+    ----------
+    piece : (list)
+        A list of splits produced by getPieces(), such that:
+            [ (record, start, sequence) ]
+    base : (str), optional
+        DNA base constituting SNRs to be searched for: 'A', 'T', 'C', 'G', 'N'.
+        The default is 'A'.
+    mism : (int), optional
+        The maximum number of mismatches allowed. The default is 0.
+    minSNRlen : (int), optional
+        The minimal length of the SNRs saved; limited to save storage space
+        needed. The default is 5.
+    SNRsByLenStrdRef : (dict), optional
+        { length : { strd : { ref : [ SNRs ] } } }
+
+    Returns
+    -------
+    SNRsByLenStrdRef : (dict)
+        { length : { strd : { ref : [ SNRs ] } } }
+    """
+    
+    # For each slice in the piece
+    for s in piece:
+        # Save the ref name & the 1st bp#
+        ref = s[0]
+        bp0 = s[1]
+        # Save the sequence to scan & initialize trackers
+        refseq = s[2]
+        end = len(refseq)
+        # Go over each strand separately
+        for b in (base, compDict[base]):
+            strd = b == base
+            if verbose:
+                logger.info(f'Looking for SNRs with {mism} mismatches on '
+                            f'reference {ref}{"+" if strd else "-"}, '
+                            f'starting @ bp {bp0:,d}...')
+            eitherCaps = capsDict[b]
+            # Initiate the current relative position of the tracker
+            current = 0
+            # Initiate the mismatch counter
+            nMism = 0
+            # Initiate the list of valid base blocks
+            blocks = []
+            # Initiate the indicator of being in a block
+            blocked = False
+            # Keep scanning the sequence until the end is reached, while adding
+            #  and removing blocks
+            while current < end:
+                # If this is the base but block has not been started, start one
+                #  (if currently in a block, just pass onto the next base - the
+                #  two conditions below cannot be merged into one)
+                if refseq[current] in eitherCaps:
+                    if not blocked:
+                        start = current
+                        blocked = True
+                else:
+                    # If a block just ended, add it
+                    if blocked:
+                        blocks.append((start, current))
+                        blocked = False
+                    # Count the mismatch only if inside a potential SNR
+                    if blocks:
+                        nMism += 1
+                        # If mism has been exceeded
+                        if nMism > mism:
+                            first = blocks[0][0]
+                            last = blocks[-1][-1]
+                            length = last - first
+                            # Add the SNR if minSNRlen has been met
+                            if length >= minSNRlen:
+                                # Save the mismatches, which are all the
+                                #  non-bases between the blocks
+                                misms = tuple(
+                                    bp0 + m for m in range(blocks[0][-1],
+                                                           blocks[-1][0])
+                                    if m not in {a for block in blocks[1:-1]
+                                                 for a in range(*block)})
+                                # Add the SNR into the output dict
+                                SNRsByLenStrdRef[length][strd][ref].append(
+                                    SNR(base, ref, bp0 + first, bp0 + last,
+                                        misms, strd, set(), {}, set(), {}))
+                            # Deduct all the mismatches before the 2nd block
+                            if len(blocks) > 1:
+                                nMism -= blocks[1][0] - blocks[0][-1]
+                            else:
+                                nMism = 0
+                            # Remove the 1st block
+                            blocks = blocks[1:]
+                # Move over to the next base
+                current += 1
+            if verbose:
+                logger.info(f'Search for SNRs with {mism} mismatches on '
+                            f'reference {ref}{"+" if strd else "-"}, '
+                            f'finished @ bp {bp0 + current:,d}...')
     
     return SNRsByLenStrdRef
 

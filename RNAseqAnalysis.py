@@ -977,9 +977,9 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     sensitivity = TP / Pos
     specificity = TN / Neg
     if not 0 <= sensitivity <= 1:
-        raise Exception(f'Sensitivity is {sensitivity}.')
+        raise ValueError(f'Sensitivity is {sensitivity}.')
     if not 0 <= specificity <= 1:
-        raise Exception(f'Specificity is {specificity}.')
+        raise ValueError(f'Specificity is {specificity}.')
     
     return TP, FN, TN, FP, eachTransStartByStrdRef
 
@@ -1360,9 +1360,9 @@ def getSNREndROC(SNRsByLenStrdRef, tROC, out_SNREndROC, bamfile,
         specificity = TN / Neg        
         
         if not 0 <= sensitivity <= 1:
-            raise Exception(f'Sensitivity is {sensitivity}.')
+            raise ValueError(f'Sensitivity is {sensitivity}.')
         if not 0 <= specificity <= 1:
-            raise Exception(f'Specificity is {specificity}.')
+            raise ValueError(f'Specificity is {specificity}.')
 
         snrROC[length] = TP, FN, TN, FP
     
@@ -1558,9 +1558,9 @@ def getSNRcovByTrans(SNRsByLenStrdRef, tROC, out_snrROC, bamfile,
             Sens = TP / Pos
             Spec = TN / Neg
             if not 0 <= Sens <= 1:
-                raise Exception("Sensitivity is {}.".format(Sens))
+                raise ValueError("Sensitivity is {}.".format(Sens))
             if not 0 <= Spec <= 1:
-                raise Exception("Specificity is {}.".format(Spec))
+                raise ValueError("Specificity is {}.".format(Spec))
             snrROC[length] = TP, FN, TN, FP
     
     bam.close()
