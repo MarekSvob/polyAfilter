@@ -561,6 +561,8 @@ def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
             blocks = []
             # Initiate the indicator of being in a block
             blocked = False
+            # Initiate the indicator of having saved an SNR with the last block
+            lastBlockSaved = True
             # Keep scanning the sequence until the end is reached, while adding
             #  and removing blocks
             while current < end:
@@ -575,28 +577,35 @@ def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
                     # If a block just ended, add it
                     if blocked:
                         blocks.append((start, current))
+                        lastBlockSaved = False
                         blocked = False
                     # Count the mismatch only if inside a potential SNR
                     if blocks:
                         nMism += 1
-                        # If mism has been exceeded
+                        # If mism has been exceeded, an SNR may be added but
+                        #  always remove the 1st block & decrease the mism
                         if nMism > mism:
-                            first = blocks[0][0]
-                            last = blocks[-1][-1]
-                            length = last - first
-                            # Add the SNR if minSNRlen has been met
-                            if length >= minSNRlen:
-                                # Save the mismatches, which are all the
-                                #  non-bases between the blocks
-                                misms = tuple(
-                                    bp0 + m for m in range(blocks[0][-1],
-                                                           blocks[-1][0])
-                                    if m not in {a for block in blocks[1:-1]
-                                                 for a in range(*block)})
-                                # Add the SNR into the output dict
-                                SNRsByLenStrdRef[length][strd][ref].append(
-                                    SNR(base, ref, bp0 + first, bp0 + last,
-                                        misms, strd, set(), {}, set(), {}))
+                            # Only save the SNR if the most recent block hasn't
+                            #  been saved in an SNR yet (if it has, it implies
+                            #  that this would not be the longest SNR possible)
+                            if not lastBlockSaved:
+                                first = blocks[0][0]
+                                last = blocks[-1][-1]
+                                length = last - first
+                                # Add the SNR if minSNRlen has been met
+                                if length >= minSNRlen:
+                                    # Save the mismatches, which are all the
+                                    #  non-bases between the blocks
+                                    misms = tuple(
+                                        bp0 + m for m in range(blocks[0][-1],
+                                                               blocks[-1][0])
+                                        if m not in {a for block in blocks[1:-1]
+                                                     for a in range(*block)})
+                                    # Add the SNR into the output dict
+                                    SNRsByLenStrdRef[length][strd][ref].append(
+                                        SNR(base, ref, bp0 + first, bp0 + last,
+                                            misms, strd, set(), {}, set(), {}))
+                                    lastBlockSaved = True
                             # Deduct all the mismatches before the 2nd block
                             if len(blocks) > 1:
                                 nMism -= blocks[1][0] - blocks[0][-1]
