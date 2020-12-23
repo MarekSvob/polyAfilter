@@ -512,8 +512,8 @@ def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
     """A universal detection of SNRs of maximum length with a given number of
     mismatches allowed in non-terminal positions. This function is meant to run
     once per processing thread. Conceptually, once the maximum # of mismatches
-    is encountered after at least 1 block of bases, and the total sum of bases
-    in the current block(s) is higher than minSNRlen, a new SNR is added.
+    is encountered after at least 1 block of bases, and the total sum of bp in
+    the current block(s) is higher than minSNRlen, a new SNR is added.
 
     Parameters
     ----------
@@ -537,6 +537,27 @@ def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
         { length : { strd : { ref : [ SNRs ] } } }
     """
     
+    def mayAddSNR():
+        """A helper function that adds an SNR if the length condition is met.
+        """
+        nonlocal SNRsByLenStrdRef, lastBlockSaved
+        
+        first = blocks[0][0]
+        last = blocks[-1][-1]
+        length = last - first
+        # Add the SNR if minSNRlen has been met
+        if length >= minSNRlen:
+            # Save the mismatches, which are all the
+            #  non-bases between the blocks
+            misms = tuple(bp0 + m for m in range(blocks[0][-1], blocks[-1][0])
+                          if m not in {a for block in blocks[1:-1]
+                                       for a in range(*block)})
+            # Add the SNR into the output dict
+            SNRsByLenStrdRef[length][strd][ref].append(
+                SNR(base, ref, bp0 + first, bp0 + last, misms, strd,
+                    set(), {}, set(), {}))
+            lastBlockSaved = True
+    
     # For each slice in the piece
     for s in piece:
         # Save the ref name & the 1st bp#
@@ -544,7 +565,6 @@ def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
         bp0 = s[1]
         # Save the sequence to scan & initialize trackers
         refseq = s[2]
-        end = len(refseq)
         # Go over each strand separately
         for b in (base, compDict[base]):
             strd = b == base
@@ -553,8 +573,6 @@ def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
                             f'reference {ref}{"+" if strd else "-"}, '
                             f'starting @ bp {bp0:,d}...')
             eitherCaps = capsDict[b]
-            # Initiate the current relative position of the tracker
-            current = 0
             # Initiate the mismatch counter
             nMism = 0
             # Initiate the list of valid base blocks
@@ -563,20 +581,19 @@ def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
             blocked = False
             # Initiate the indicator of having saved an SNR with the last block
             lastBlockSaved = True
-            # Keep scanning the sequence until the end is reached, while adding
-            #  and removing blocks
-            while current < end:
+            # Scanning the sequence, while adding and removing blocks
+            for i, bp in enumerate(refseq):
                 # If this is the base but block has not been started, start one
                 #  (if currently in a block, just pass onto the next base - the
                 #  two conditions below cannot be merged into one)
-                if refseq[current] in eitherCaps:
+                if bp in eitherCaps:
                     if not blocked:
-                        start = current
+                        start = i
                         blocked = True
                 else:
                     # If a block just ended, add it
                     if blocked:
-                        blocks.append((start, current))
+                        blocks.append((start, i))
                         lastBlockSaved = False
                         blocked = False
                     # Count the mismatch only if inside a potential SNR
@@ -589,23 +606,7 @@ def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
                             #  been saved in an SNR yet (if it has, it implies
                             #  that this would not be the longest SNR possible)
                             if not lastBlockSaved:
-                                first = blocks[0][0]
-                                last = blocks[-1][-1]
-                                length = last - first
-                                # Add the SNR if minSNRlen has been met
-                                if length >= minSNRlen:
-                                    # Save the mismatches, which are all the
-                                    #  non-bases between the blocks
-                                    misms = tuple(
-                                        bp0 + m for m in range(blocks[0][-1],
-                                                               blocks[-1][0])
-                                        if m not in {a for block in blocks[1:-1]
-                                                     for a in range(*block)})
-                                    # Add the SNR into the output dict
-                                    SNRsByLenStrdRef[length][strd][ref].append(
-                                        SNR(base, ref, bp0 + first, bp0 + last,
-                                            misms, strd, set(), {}, set(), {}))
-                                    lastBlockSaved = True
+                                mayAddSNR()
                             # Deduct all the mismatches before the 2nd block
                             if len(blocks) > 1:
                                 nMism -= blocks[1][0] - blocks[0][-1]
@@ -613,12 +614,19 @@ def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
                                 nMism = 0
                             # Remove the 1st block
                             blocks = blocks[1:]
-                # Move over to the next base
-                current += 1
+            # Once the sequence scanning is done, the last SNR may be added
+            #  even if the mism has not been reached
+            # If the sequence ended in a block, add it
+            if blocked:
+                blocks.append((start, i+1))
+                lastBlockSaved = False
+            # If the last block has not been saved, an SNR may be added
+            if blocks and not lastBlockSaved:
+                mayAddSNR()
             if verbose:
                 logger.info(f'Search for SNRs with {mism} mismatches on '
                             f'reference {ref}{"+" if strd else "-"}, '
-                            f'finished @ bp {bp0 + current:,d}...')
+                            f'finished @ bp {bp0 + i:,d}...')
     
     return SNRsByLenStrdRef
 
