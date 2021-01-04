@@ -615,17 +615,18 @@ def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
     logger.info(f'Writing the filtered BAM file, to exclude approximately '
                 f'{nAligToRemove:,d} mapped alignments out of {total:,d} '
                 'total...')
-    # Write the new bam file
+    # Write the new bam file, including all unmapped reads and a proportion of
+    #  mapped reads
     bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bamIN)
     nAll = 0
     included = 0
     for alignment in bamIN.fetch(until_eof = True):
         nAll += 1
-        if not alignment.is_unmapped and random() < keepMapProb:
+        if alignment.is_unmapped or random() < keepMapProb:
             bamOUT.write(alignment)
             included += 1
-            if cbFile:
-                removed.add(alignment)
+        elif cbFile:
+            removed.add(alignment)
             
         if not nAll % 10000000 and nAll and verbose:
             logger.info(f'Processed {nAll:,d} input alignments, of which '
