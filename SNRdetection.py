@@ -570,8 +570,8 @@ def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
             strd = b == base
             if verbose:
                 logger.info(f'Looking for SNRs with {mism} mismatches on '
-                            f'reference {ref}{"+" if strd else "-"}, '
-                            f'starting @ bp {bp0:,d}...')
+                            f'reference {ref}{"+" if strd else "-"}, starting '
+                            f'@ bp {bp0:,d}...')
             eitherCaps = capsDict[b]
             # Initiate the mismatch counter
             nMism = 0
@@ -625,8 +625,8 @@ def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
                 mayAddSNR()
             if verbose:
                 logger.info(f'Search for SNRs with {mism} mismatches on '
-                            f'reference {ref}{"+" if strd else "-"}, '
-                            f'finished @ bp {bp0 + i:,d}...')
+                            f'reference {ref}{"+" if strd else "-"} finished '
+                            f'@ bp {bp0 + i:,d}...')
     
     return SNRsByLenStrdRef
 

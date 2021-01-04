@@ -11,6 +11,7 @@ import pysam
 import logging
 import multiprocessing
 import multiprocessing.pool
+from random import seed, random
 
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
     sortSNRsByLenStrdRef
@@ -310,10 +311,13 @@ def parallel_wrapper(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
             weightedCov = weightedCov)    
     # Extract the transcript starts for this coverage length
     eachTransStartByStrdRef = tROC[covLen][4]
-    # Load and, if relevant, pre-sort SNRs by len, strd & ref
-    SNRsByLenStrdRef = loadPKL(out_SNRsByLenStrdRef)
-    if minSNRlen is not None and not sortedSNRs:
-        SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)
+    # If relevant, load and pre-sort SNRs by len, strd & ref
+    if minSNRlen is None:
+        SNRsByLenStrdRef = None
+    else:
+        SNRsByLenStrdRef = loadPKL(out_SNRsByLenStrdRef)
+        if not sortedSNRs:
+            SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)        
     
     logger.info(f'Identifying alignments {covLen:,d} bp upstream of non-'
                 f'terminal SNR{minSNRlen}+ to be removed across {nThreads} '
@@ -389,9 +393,9 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
         The default is True.
     weightedCov : (bool), optional
         Determines whether the covered bases are weighted by coverage amount
-        (i.e., coverage is summed). Alternatively, the sensitivity/specificity
-        relationship is purely binary (flat) and the covered bases (1) have the
-        same weight as non-covered ones (0). The default is True.
+        (i.e., coverage is summed). Only included for the purposes of using
+        cached baseline files; otherwise has no impact on the results of this
+        function. The default is True.
     verbose : (bool), optional
         Indicates whether extra messages are logged. The default is False.
     nThreads : (int), optional
@@ -424,10 +428,11 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
                 weightedCov = weightedCov)    
         # Extract the transcript starts for this coverage length
         eachTransStartByStrdRef = tROC[covLen][4]
-        # Load and, if relevant, pre-sort SNRs by len, strd & ref
-        SNRsByLenStrdRef = loadPKL(out_SNRsByLenStrdRef)
-        if minSNRlen is not None and not sortedSNRs:
-            SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)
+        # If relevant, load and pre-sort SNRs by len, strd & ref
+        if minSNRlen is not None:
+            SNRsByLenStrdRef = loadPKL(out_SNRsByLenStrdRef)
+            if not sortedSNRs:
+                SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)
         
         logger.info(f'Identifying alignments {covLen:,d} bp upstream of non-'
                     f'terminal SNR{minSNRlen}+ to be removed in 1 serial '
@@ -468,9 +473,9 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
                     # Find overlaps between SNRpieces & tStarts
                     SNRpieceOverlaps = getOverlaps(flatStarts, SNRpieces)
                 
-                # Remove SNRsByLenStrdRef to free up RAM for the alingments
-                del SNRsByLenStrdRef
-                gc.collect()
+                    # Remove SNRsByLenStrdRef to free up RAM for the alingments
+                    del SNRsByLenStrdRef
+                    gc.collect()
                 
                 # Go over all the pieces to fetch the alignments
                 for start, end in SNRpieceOverlaps:
@@ -538,7 +543,7 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
             bamOUT.write(alignment)
             included += 1
             
-        if verbose and nAll and not nAll % 10000000:
+        if not nAll % 10000000 and nAll and verbose:
             logger.info(f'Processed {nAll:,d} input alignments, of which '
                         f'{nAll-included:,d} were excluded...')
             
@@ -548,4 +553,92 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
     logger.info(f'A filtered BAM file with {included:,d}/{nAll:,d} alignments '
                 f'has been created. [Excluded {nAll-included:,d} alignments '
                 f'{covLen:,d} bp upstream of non-terminal SNR{minSNRlen}+.]')
+
+
+def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
+                  cbFile = None, out_cbFile = None, verbose = False):
+    """Function that RANDOMLY filters an indexed BAM file to remove a given
+    proportion of total alignments (note that only *mapped* alignments will be
+    removed).
+
+    Parameters
+    ----------
+    remProp : (float)
+        The proportion of *all* alignments to be removed. (However, only
+        mapped alignments will be removed.)
+    bamfile : (str)
+        Location of the sorted and indexed bamfile to be filtered.
+    setSeed : (int), optional
+        Ensures reproducibility of pseudorandom functions. The default is 1.
+    out_bamfile : (str, None)
+        Location of the resulting filtered bamfile. If None, the name of the
+        input bamfile name is used with '.filtered.bam' appended. The default
+        is None.
+    cbFile : (str, None), optional
+        Location of the scumi cell barcode count file, if any. The default is
+        None.
+    out_cbFile : (str, None), optional
+        Location of a new scumi cell barcode count file, if any. If None, the
+        cbFile name is used with '.filtered.tsv' appended. The default is None.
+    verbose : (bool), optional
+        Indicates whether extra messages are logged. The default is False.
+
+    Returns
+    -------
+    None.
+    """    
+    # Initiate the correct output file name
+    if out_bamfile is None:
+        out_bamfile = bamfile + '.filtered.bam'
+    # If the BAM file already exists, do not overwrite
+    if os.path.isfile(out_bamfile):
+        logger.info(f'The filtered BAM file "{out_bamfile}" already exists.')
+        return
+    
+    # Set the seed for reproducibility
+    seed(a = setSeed)
+    # Initiate the set of removed alignments (only used for cbFile filtering)
+    removed = set()
+    
+    # Create the bamfile and add the reads randomly kept
+    bamIN = pysam.AlignmentFile(bamfile, 'rb')
+    # Obtain the probability for the *mapped* (as opposed to all) alignments
+    #  to be kept
+    # Get the total # of alignments in the BAM file; more details:
+    #  https://github.com/pysam-developers/pysam/issues/968
+    total = bamIN.mapped + bamIN.unmapped
+    # Calculate the # of alignmens to be removed
+    nAligToRemove = int(remProp * total)
+    # Calculate the proportion of mapped alignments to be kept
+    keepMapProb = 1 - nAligToRemove / (total - bamIN.nocoordinate)
+
+    logger.info(f'Writing the filtered BAM file, to exclude approximately '
+                f'{nAligToRemove:,d} mapped alignments out of {total:,d} '
+                'total...')
+    # Write the new bam file
+    bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bamIN)
+    nAll = 0
+    included = 0
+    for alignment in bamIN.fetch(until_eof = True):
+        nAll += 1
+        if not alignment.is_unmapped and random() < keepMapProb:
+            bamOUT.write(alignment)
+            included += 1
+            if cbFile:
+                removed.add(alignment)
+            
+        if not nAll % 10000000 and nAll and verbose:
+            logger.info(f'Processed {nAll:,d} input alignments, of which '
+                        f'{nAll-included:,d} were excluded...')
+            
+    # Close the files
+    bamIN.close()
+    bamOUT.close()
+    logger.info(f'A filtered BAM file with {included:,d}/{nAll:,d} alignments '
+                f'has been created. [Randomly excluded {nAll-included:,d} '
+                'alignments.]')
+
+    # Filter the cbFile, if any
+    if len(removed):
+        cbFileFilter(removed, cbFile, out_cbFile, verbose)
     
