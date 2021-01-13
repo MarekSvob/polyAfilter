@@ -12,6 +12,7 @@ import logging
 import multiprocessing
 import multiprocessing.pool
 from random import seed, random
+from collections import defaultdict
 
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
     sortSNRsByLenStrdRef
@@ -53,7 +54,6 @@ def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
     import numpy as np
     import pandas as pd
     import regex as re
-    from collections import defaultdict
     from functools import partial
     from scumi import scumi as scu
     
@@ -440,7 +440,9 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
         # Connect to the bam file
         bam = pysam.AlignmentFile(bamfile, 'rb')
         
-        # Go over each strand and ref separately
+        SNRpieceOverlapsByStrdRef = defaultdict(lambda: defaultdict(dict))
+        
+        # Go over each strand and ref separately to obtain overlaps with SNRs
         for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
             for refName, eachTransStart in eachTransStartByRef.items():
                 if verbose:
@@ -455,7 +457,7 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
                 # minSNRlen = None means that all non-end coverage is removed,
                 #  regardless of SNR pieces
                 if minSNRlen is None:
-                    SNRpieceOverlaps = flatStarts
+                    SNRpieceOverlapsByStrdRef[strd][refName] = flatStarts
                 else:
                     # Flatten all the relevant SNR pieces
                     SNRpieces = []
@@ -471,13 +473,17 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
                                 SNRpieces.append((start, end))
                     SNRpieces = flattenIntervals(SNRpieces)
                     # Find overlaps between SNRpieces & tStarts
-                    SNRpieceOverlaps = getOverlaps(flatStarts, SNRpieces)
-                
-                    # Remove SNRsByLenStrdRef to free up RAM for the alingments
-                    del SNRsByLenStrdRef
-                    gc.collect()
-                
-                # Go over all the pieces to fetch the alignments
+                    SNRpieceOverlapsByStrdRef[strd][refName] = getOverlaps(
+                        flatStarts, SNRpieces)
+                    
+        # Remove SNRsByLenStrdRef to free up RAM for the alingments
+        if minSNRlen is not None:
+            del SNRsByLenStrdRef
+            gc.collect()
+        
+        # Go over all the pieces, by strd & ref, to fetch the alignments
+        for strd, SNRpieceOverlapsByRef in SNRpieceOverlapsByStrdRef.items():
+            for refName, SNRpieceOverlaps in SNRpieceOverlapsByRef.items():
                 for start, end in SNRpieceOverlaps:
                     for alignment in bam.fetch(
                             contig = refName, start = start, stop = end):
