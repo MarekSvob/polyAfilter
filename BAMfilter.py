@@ -446,8 +446,8 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
         for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
             for refName, eachTransStart in eachTransStartByRef.items():
                 if verbose:
-                    logger.info('Identifying alignments to be removed on refe'
-                                f'rence {refName}{"+" if strd else "-"}...')
+                    logger.info('Getting overlaps of SNRs on transcripts on re'
+                                f'ference {refName}{"+" if strd else "-"}...')
                 refLen = bam.get_reference_length(refName)
                 # Flatten all the expressed transcript starts on this strd/ref
                 flatStarts = []
@@ -484,6 +484,9 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
         # Go over all the pieces, by strd & ref, to fetch the alignments
         for strd, SNRpieceOverlapsByRef in SNRpieceOverlapsByStrdRef.items():
             for refName, SNRpieceOverlaps in SNRpieceOverlapsByRef.items():
+                if verbose:
+                    logger.info('Identifying alignments to be removed on refe'
+                                f'rence {refName}{"+" if strd else "-"}...')
                 for start, end in SNRpieceOverlaps:
                     for alignment in bam.fetch(
                             contig = refName, start = start, stop = end):
