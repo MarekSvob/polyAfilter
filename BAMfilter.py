@@ -159,7 +159,10 @@ def getAlignmentsToRemove(strd, refName, eachTransStart):
                     else:
                         start = SNR.end
                         end = min(refLen, SNR.end + covLen)
-                    SNRpieces.append((start, end))
+                    # Make sure that this is a non-0 interval
+                    #  (when SNR is at the beginning of the ref)
+                    if start != end:
+                        SNRpieces.append((start, end))
         SNRpieces = flattenIntervals(SNRpieces)
         # Find overlaps between SNRpieces & tStarts
         SNRpieceOverlaps = getOverlaps(flatStarts, SNRpieces)
@@ -315,6 +318,7 @@ def parallel_wrapper(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
     if minSNRlen is None:
         SNRsByLenStrdRef = None
     else:
+        logger.info(f'Loading SNRs from {out_SNRsByLenStrdRef}...')
         SNRsByLenStrdRef = loadPKL(out_SNRsByLenStrdRef)
         if not sortedSNRs:
             SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)        
@@ -430,6 +434,7 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
         eachTransStartByStrdRef = tROC[covLen][4]
         # If relevant, load and pre-sort SNRs by len, strd & ref
         if minSNRlen is not None:
+            logger.info(f'Loading SNRs from {out_SNRsByLenStrdRef}...')
             SNRsByLenStrdRef = loadPKL(out_SNRsByLenStrdRef)
             if not sortedSNRs:
                 SNRsByLenStrdRef = sortSNRsByLenStrdRef(SNRsByLenStrdRef)
@@ -470,7 +475,10 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
                                 else:
                                     start = SNR.end
                                     end = min(refLen, SNR.end + covLen)
-                                SNRpieces.append((start, end))
+                                # Make sure that this is a non-0 interval
+                                #  (when SNR is at the beginning of the ref)
+                                if start != end:
+                                    SNRpieces.append((start, end))
                     SNRpieces = flattenIntervals(SNRpieces)
                     # Find overlaps between SNRpieces & tStarts
                     SNRpieceOverlapsByStrdRef[strd][refName] = getOverlaps(

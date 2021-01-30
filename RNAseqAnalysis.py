@@ -981,6 +981,8 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     if not 0 <= specificity <= 1:
         raise ValueError(f'Specificity is {specificity}.')
     
+    logger.info(f'Processed transcript ends of length {endLength}.')
+    
     return TP, FN, TN, FP, eachTransStartByStrdRef
 
 
