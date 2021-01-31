@@ -11,6 +11,13 @@ import pysam
 import logging
 import multiprocessing
 import multiprocessing.pool
+
+import numpy as np
+import pandas as pd
+import regex as re
+from functools import partial
+from scumi import scumi as scu
+
 from random import seed, random
 from collections import defaultdict
 
@@ -49,14 +56,7 @@ def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
     """
     
     if verbose:
-        logger.info('Counting UMIs per cell to be removed from the CB file...')
-    # Import the modules that are only necessary if a cbFile was provided
-    import numpy as np
-    import pandas as pd
-    import regex as re
-    from functools import partial
-    from scumi import scumi as scu
-    
+        logger.info('Counting UMIs per cell to be removed from the CB file...')    
     # Note: the following code has been adapted from the scumi module
     # Get one read as an example
     firstRead = next(iter(toRemove))
