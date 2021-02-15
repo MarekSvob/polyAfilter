@@ -654,8 +654,9 @@ def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons,
         return covTransByStrdRef, Pos, Neg
     
     # Otherwise initialize the variables    
-    logger.info('Getting baseline data for ROC across covered transcripts, '
-                f'{"including" if includeIntrons else "excluding"} introns...')
+    logger.info('Getting baseline data across covered transcripts, '
+                f'{"including" if includeIntrons else "excluding"} introns, '
+                f'in {bamfile}...')
     covTransByStrdRef = defaultdict(lambda: defaultdict(list))
     Pos = 0
     Neg = 0
@@ -668,6 +669,8 @@ def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons,
     # Get all exon-covered transcripts and their flattened exons by strd & ref
     for strd in (True, False):
         for refname in references:
+            logger.info('Processing transcripts on reference '
+                        f'{refname}{"+" if strd else "-"}...')
             # Initiate the to-be-flattened list of exons/transcripts for this
             #  strd/reference
             covPieces = []
