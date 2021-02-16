@@ -56,58 +56,66 @@ def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
     """
     
     if verbose:
-        logger.info('Counting UMIs per cell to be removed from the CB file...')    
-    # Note: the following code has been adapted from the scumi module
-    # Get one read as an example
-    firstRead = next(iter(toRemove))
-    # Determine which barcodes are present
-    barcodes = set()
-    for barcode in ['CB_', 'UB_']:
-        if barcode in firstRead.query_name:
-            barcodes.add(barcode)
-    # Construct the barcode parser based on the barcodes present
-    barcodeParser = '.*'
-    if 'CB_' in barcodes:
-        barcodeParser += ':CB_(?P<CB>[A-Z\-]+)'
-    if 'UB_' in barcodes:
-        barcodeParser += ':UB_(?P<UB>[A-Z\-]+)'
-    # Skip counting barcodes if none present
-    if barcodeParser == '.*':
-        logger.error('Error: no cell barcodes or UMIs.')
-        return
-    barcodeParser += ':*'
-    barcodeParser = re.compile(barcodeParser)
-    
-    # Initiate the counter of UMIs per cell, including T frequency
-    cbDF = pd.read_csv(cbFile, sep = '\t', index_col = 0, header = 0)
-    cbCounter = defaultdict(
-        partial(np.zeros, shape = cbDF.shape[1], dtype = np.uint32))
-    
-    for read in toRemove:
-        # Extract the respective barcodes & count them for each read
-        match = barcodeParser.match(read.query_name)
-        cb = scu._extract_tag(match, 'CB')
-        umi = scu._extract_tag(match, 'UB')
-        cbCounter[cb] += [x == 'T' for x in 'T' + umi]
-    
-    # Create a df from the results
-    rmDF = pd.DataFrame.from_dict(cbCounter, orient = 'index')
-    rmDF.index.name = cbDF.index.name
-    rmDF.columns = cbDF.columns
-    # Subtract the rmDF from the cbDF & save
-    diffDF = cbDF.subtract(rmDF, fill_value = 0)
-    # Remove rows with 0 in cb_counts or with any negative numbers anywhere
-    diffDF = diffDF[diffDF['cb_count'] > 0]
-    diffDF = diffDF[(diffDF >= 0).all(1)].astype(np.uint32)
-    # Sort by cb_count & save
-    diffDF.sort_values(by = 'cb_count', ascending = False, inplace = True)
+        logger.info('Counting UMIs per cell to be removed from the CB file...')
+        
+    if len(toRemove):
+        # Note: the following code has been adapted from the scumi module
+        # Get one read as an example
+        firstRead = next(iter(toRemove))
+        # Determine which barcodes are present
+        barcodes = set()
+        for barcode in ['CB_', 'UB_']:
+            if barcode in firstRead.query_name:
+                barcodes.add(barcode)
+        # Construct the barcode parser based on the barcodes present
+        barcodeParser = '.*'
+        if 'CB_' in barcodes:
+            barcodeParser += ':CB_(?P<CB>[A-Z\-]+)'
+        if 'UB_' in barcodes:
+            barcodeParser += ':UB_(?P<UB>[A-Z\-]+)'
+        # Skip counting barcodes if none present
+        if barcodeParser == '.*':
+            logger.error('Error: no cell barcodes or UMIs.')
+            return
+        barcodeParser += ':*'
+        barcodeParser = re.compile(barcodeParser)
+        
+        # Initiate the counter of UMIs per cell, including T frequency
+        cbDF = pd.read_csv(cbFile, sep = '\t', index_col = 0, header = 0)
+        cbCounter = defaultdict(
+            partial(np.zeros, shape = cbDF.shape[1], dtype = np.uint32))
+        
+        for read in toRemove:
+            # Extract the respective barcodes & count them for each read
+            match = barcodeParser.match(read.query_name)
+            cb = scu._extract_tag(match, 'CB')
+            umi = scu._extract_tag(match, 'UB')
+            cbCounter[cb] += [x == 'T' for x in 'T' + umi]
+        
+        # Create a df from the results
+        rmDF = pd.DataFrame.from_dict(cbCounter, orient = 'index')
+        rmDF.index.name = cbDF.index.name
+        rmDF.columns = cbDF.columns
+        # Subtract the rmDF from the cbDF & save
+        diffDF = cbDF.subtract(rmDF, fill_value = 0)
+        # Remove rows with 0 in cb_counts or with any negative numbers anywhere
+        diffDF = diffDF[diffDF['cb_count'] > 0]
+        diffDF = diffDF[(diffDF >= 0).all(1)].astype(np.uint32)
+        # Sort by cb_count
+        diffDF.sort_values(by = 'cb_count', ascending = False, inplace = True)
+        # Report the results
+        nCells = rmDF.shape[0]
+        nUMIs = sum(rmDF['cb_count'])
+    else:
+        diffDF = pd.read_csv(cbFile, sep = '\t', index_col = 0, header = 0)
+        nCells = 0
+        nUMIs = 0
+        
+    # Save the file
     if out_cbFile is None:
         out_cbFile = cbFile + '.filtered.tsv'
     diffDF.to_csv(out_cbFile, sep = '\t')
-    
-    # Report the results
-    nCells = rmDF.shape[0]
-    nUMIs = sum(rmDF['cb_count'])
+
     if verbose:
         logger.info(f'{nUMIs:,d} reads across {nCells:,d} cell barcodes '
                     'removed from the CB file.')
@@ -540,8 +548,8 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
     
     toRemoveN = len(toRemove)
     # Filter the cbFile, if any
-    if cbFile and toRemoveN:
-        cbFileFilter(toRemove, cbFile, out_cbFile, verbose)
+    if cbFile:
+        cbFileFilter(toRemove, cbFile, out_cbFile, verbose)   
     
     # Create the bamfile and add the reads not in the toRemove set
     # Manually reopen the bam file to avoid multiple iterators issues
@@ -657,6 +665,6 @@ def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
                 'alignments.]')
 
     # Filter the cbFile, if any
-    if len(removed):
+    if cbFile:
         cbFileFilter(removed, cbFile, out_cbFile, verbose)
     
