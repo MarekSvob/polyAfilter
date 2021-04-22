@@ -345,7 +345,7 @@ def findSNRs(base, piece, db_out, temp, minFeatLen, minSNRlen):
                                         [g] = ft.attributes['gene_id'] if \
                                             'gene_id' in ft.attributes.keys() \
                                                 else ft.attributes['gene']
-                                        genes[g] = True                            
+                                        genes[g] = True
                             # Save the elements
                             elems.append(feats)
                             elems.append(genes)

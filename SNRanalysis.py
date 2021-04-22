@@ -694,35 +694,50 @@ def normalizeLabels(df, out_strandedFeats, out_db = None, fasta = None,
     return df_norm
 
 
-def getSNRsByGeneLen(lenToSNRs, concordant = True):
+def getSNRsByGeneLen(SNRsByLenStrdRef, concordant = True, sortedSNRs = True):
     """Function to sort SNRs by all genes that each of them maps to.
 
     Parameters
     ----------
-    lenToSNRs : (dict)
-        { SNRlength : [ SNR ] }
+    SNRsByLenStrdRef : (dict)
+        { length : { strd : { ref : [ SNRs ] } } } or, alternatively when
+        sortedSNRs = False: { length : [ SNRs ] }
     concordant : (bool), optional
         Indicates whether the sorting is by conrordant or discordant genes.
+        The default is True.
+    sortedSNRs : (bool), optional
+        Indicates whether the SNRs are already sorted by length, strd, and ref.
         The default is True.
 
     Returns
     -------
-    geneLenToSNRs : (dict)
+    SNRsByGeneLen : (dict)
         { gene : { SNRlength : [ SNR ] } }
     """
     
     # Initialize a nested defaultdict
-    geneLenToSNRs = collections.defaultdict(
+    SNRsByGeneLen = collections.defaultdict(
         lambda: collections.defaultdict(list))
     
-    # Go over all SNRs and sort them by concordant or discordant genes
-    for length, SNRs in lenToSNRs.items():
-        for snr in SNRs:
-            genesOfInterest = snr.concGenes if concordant else snr.discGenes
-            for gene in genesOfInterest:
-                geneLenToSNRs[gene][length].append(snr)
+    if sortedSNRs:
+        for length, SNRsByStrdRef  in SNRsByLenStrdRef.items():
+            for SNRsByRef in SNRsByStrdRef.values():
+                for SNRs in SNRsByRef.values():
+                    for snr in SNRs:
+                        genesOfInterest = list(snr.concGenes.keys()) \
+                            if concordant else list(snr.discGenes.keys())
+                        for gene in genesOfInterest:
+                            SNRsByGeneLen[gene][length].append(snr)
+    else:
+        # Go over all SNRs and sort them by concordant or discordant genes
+        for length, SNRs in SNRsByLenStrdRef.items():
+            for snr in SNRs:
+                genesOfInterest = list(snr.concGenes.keys()) if concordant \
+                    else list(snr.discGenes.keys())
+                for gene in genesOfInterest:
+                    SNRsByGeneLen[gene][length].append(snr)
     
-    return geneLenToSNRs
+    return SNRsByGeneLen
 
 
 
