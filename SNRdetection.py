@@ -370,9 +370,7 @@ def findSNRs(base, piece, db_out, temp, minFeatLen, minSNRlen):
 
 
 def findSNRsW1mism(base, piece, minSNRlen = 5, verbose = False,
-                   SNRsByLenStrdRef = collections.defaultdict(
-                       lambda: collections.defaultdict(
-                           lambda: collections.defaultdict(list)))):
+                   SNRsByLenStrdRef = None):
     """A faster version of findSNRs w/o any database lookup (of featureTypes
     or genes), with 1 mismatch allowed in a non-terminal position. Note that 2
     SNRs with 1 mismatch each may overlap if they constitute of 3 blocks
@@ -389,9 +387,9 @@ def findSNRsW1mism(base, piece, minSNRlen = 5, verbose = False,
     minSNRlen : (int)
         The minimal length of the SNRs saved; limited to save storage space
         needed.
-    SNRsByLenStrdRef : (dict)
-        { length : { strd : { ref : [ SNRs ] } } }
-
+    SNRsByLenStrdRef : (None or dict), optional
+        { length : { strd : { ref : [ SNRs ] } } }. The default is None.
+    
     Returns
     -------
     SNRsByLenStrdRef : (dict)
@@ -400,6 +398,11 @@ def findSNRsW1mism(base, piece, minSNRlen = 5, verbose = False,
     
     # Define the complement base to be sought
     cBase = compDict[base]
+    # Set up the output dictionary
+    if SNRsByLenStrdRef is None:
+        SNRsByLenStrdRef = collections.defaultdict(
+            lambda: collections.defaultdict(
+                lambda: collections.defaultdict(list)))
     
     # For each slice in the piece
     for s in piece:
@@ -505,10 +508,8 @@ def findSNRsW1mism(base, piece, minSNRlen = 5, verbose = False,
     return SNRsByLenStrdRef
 
 
-def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
-                   SNRsByLenStrdRef = collections.defaultdict(
-                       lambda: collections.defaultdict(
-                           lambda: collections.defaultdict(list)))):
+def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, strand = None,
+                   verbose = False, SNRsByLenStrdRef = None):
     """A universal detection of SNRs of maximum length with a given number of
     mismatches allowed in non-terminal positions. This function is meant to run
     once per processing thread. Conceptually, once the maximum # of mismatches
@@ -528,8 +529,13 @@ def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
     minSNRlen : (int), optional
         The minimal length of the SNRs saved; limited to save storage space
         needed. The default is 5.
-    SNRsByLenStrdRef : (dict), optional
-        { length : { strd : { ref : [ SNRs ] } } }
+    strand : (None or bool), optional
+        Which strand is going to be scanned: both (None), + (True), - (False).
+        The default is None.
+    verbose : (bool), optional
+        Whether messages will be logged. The default if False.
+    SNRsByLenStrdRef : (None or dict), optional
+        { length : { strd : { ref : [ SNRs ] } } }. The default is None.
 
     Returns
     -------
@@ -558,6 +564,14 @@ def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
                     set(), {}, set(), {}))
             lastBlockSaved = True
     
+    # Set up the strands to scan for based on the input
+    strands = (True, False) if strand is None else (strand, )
+    # Set up the output dictionary
+    if SNRsByLenStrdRef is None:
+        SNRsByLenStrdRef = collections.defaultdict(
+            lambda: collections.defaultdict(
+                lambda: collections.defaultdict(list)))
+    
     # For each slice in the piece
     for s in piece:
         # Save the ref name & the 1st bp#
@@ -566,13 +580,13 @@ def findSNRsWmisms(piece, base = 'A', mism = 0, minSNRlen = 5, verbose = False,
         # Save the sequence to scan & initialize trackers
         refseq = s[2]
         # Go over each strand separately
-        for b in (base, compDict[base]):
-            strd = b == base
+        for strd in strands:
             if verbose:
                 logger.info(f'Looking for SNRs with {mism} mismatches on '
                             f'reference {ref}{"+" if strd else "-"}, starting '
                             f'@ bp {bp0:,d}...')
-            eitherCaps = capsDict[b]
+            # Determine which bases will be scanned for
+            eitherCaps = capsDict[(compDict[base], base)[strd]]
             # Initiate the mismatch counter
             nMism = 0
             # Initiate the list of valid base blocks
