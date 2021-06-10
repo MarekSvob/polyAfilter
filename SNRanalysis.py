@@ -113,10 +113,12 @@ def countsCheck(base, lengthToSNRcounts, lenToFeats, out_bases, fasta = None):
     bases = getBaseComp(out_bases, fasta = fasta)
     # Get the number of bases (including complementary and non-caps) from the
     #  genome scan.
-    scanned = (bases[capsDict[base][0]]
-               + bases[capsDict[base][1]]
-               + bases[capsDict[compDict[base]][0]]
-               + bases[capsDict[compDict[base]][1]])
+    scanned = (sum(bases[cap] for cap in capsDict[base])
+               + sum(bases[cap] for cap in capsDict[compDict[base]]))
+    # scanned = (bases[capsDict[base][0]]
+    #            + bases[capsDict[base][1]]
+    #            + bases[capsDict[compDict[base]][0]]
+    #            + bases[capsDict[compDict[base]][1]])
     
     featbases = sum([c*l for l,cs in lenToFeats.items() for c in cs.values()])
     
@@ -160,10 +162,12 @@ def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
                      + bases['C'] + bases['c'] + bases['G'] + bases['g'])
     
     # Calculate the frequency of the base in question and its complement
-    pBase = (bases[capsDict[base][0]]
-             + bases[capsDict[base][1]]) / sumKnownBases
-    pComp = (bases[capsDict[compDict[base]][0]]
-             + bases[capsDict[compDict[base]][1]]) / sumKnownBases
+    pBase = sum(bases[cap] for cap in capsDict[base]) / sumKnownBases
+    # pBase = (bases[capsDict[base][0]]     # capsDict changed to dict(sets)
+    #          + bases[capsDict[base][1]]) / sumKnownBases
+    pComp = sum(bases[cap] for cap in capsDict[compDict[base]]) / sumKnownBases
+    # pComp = (bases[capsDict[compDict[base]][0]]
+    #          + bases[capsDict[compDict[base]][1]]) / sumKnownBases
     
     # Obtain the table data as a list of 3 respective lists: SNRlength,
     #  Observed absolute # of SNRs, and O/E ratio
