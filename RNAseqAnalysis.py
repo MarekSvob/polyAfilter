@@ -24,8 +24,6 @@ logging.basicConfig(level = logging.INFO,
                     format = '%(asctime)s - %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-expCovByConcFeat = defaultdict(lambda: defaultdict(int))
-
 
 class NoncGene:
     """An object that stores information about a gene identified to be
@@ -164,13 +162,6 @@ def getExpectedCoverage(out_db, out_strandedFeats, bamfile, concordant = True,
         The expected per-base coverage from the RNA-seq data.
     """
     
-    global expCovByConcFeat
-    
-    # Try to retrieve the value if already calculated in this session
-    if expCovByConcFeat[concordant][baselineFeat] != 0:
-        expected = expCovByConcFeat[concordant][baselineFeat]
-        return expected
-    
     # In most cases, this should just load a file
     flatFeats = getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db,
                                           (baselineFeat, ))
@@ -192,15 +183,13 @@ def getExpectedCoverage(out_db, out_strandedFeats, bamfile, concordant = True,
                     bam.count_coverage(
                         contig = ref, start = start, stop = end,
                         quality_threshold = 0,
-                        read_callback = lambda r: r.is_reverse != strd),
+                        read_callback = lambda r:
+                            r.is_reverse != (strd == concordant)),
                     dtype = 'int')
     bam.close()
     
     # Normalize the coverage by #SNRs, total coverage, and total length
     expected = totalCoverage / totalLength
-    
-    # Save the value for later use in this session
-    expCovByConcFeat[concordant][baselineFeat] = expected
     
     return expected
 
@@ -345,7 +334,7 @@ def getCovPerSNR(out_SNRCovLen, out_SNROutl, lenToSNRs, out_db,
 
 
 def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
-                  window = 2000):
+                  window = 2000, concordant = True):
     """Function that aggregates all per-transcript coverage.
 
     Parameters
@@ -360,6 +349,8 @@ def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
         Path to the (pre-filtered) bamfile.
     window : (int), optional
         Total size of the window around the SNR covered. The default is 2000.
+    concordant : (bool), optional
+        Determines which strand the alignments come from (fwd vs. rev).
 
     Returns
     -------
@@ -374,7 +365,7 @@ def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
     
     # Get the expected coverage
     expCov = getExpectedCoverage(out_db, out_strandedFeats, exonic_bamfile,
-                                 concordant = True,
+                                 concordant = concordant,
                                  baselineFeat = 'transcript')
     
     # In most cases, this should just load a file
@@ -400,7 +391,7 @@ def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
                     mid = feat[0]
                 start = int(mid - window / 2)
                 stop = int(mid + window / 2)
-                # Include correctins for the start & end if the window
+                # Include corrections for the start & end if the window
                 #  falls out of the reference size range
                 corrStart = max(0, start)
                 corrStop = min(refLen, stop)
@@ -411,7 +402,8 @@ def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
                                        stop = corrStop,
                                        quality_threshold = 0,
                                        read_callback = lambda r:
-                                           r.is_reverse != strd),
+                                           r.is_reverse != (
+                                               strd == concordant)),
                     axis = 0)
                 transCount += 1
                 # If the window was out of the ref range, fill in the rest
@@ -425,7 +417,7 @@ def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
                 #  orientation wrt/ the transcript feature direction
                 if not strd:
                     refCoverage = refCoverage[::-1]
-                # Add the SNR
+                # Add the transcript coverage
                 coverage += refCoverage
     # Normalize the coverage only once at the end
     normCov = coverage / (transCount * expCov)

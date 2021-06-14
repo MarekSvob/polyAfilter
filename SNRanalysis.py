@@ -623,7 +623,7 @@ def getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db, featsOfInterest):
     return flatFeats
     
 
-def normalizeLabels(df, out_strandedFeats, out_db = None, fasta = None,
+def normalizeLabels(df, out_strandedFeats, fasta, out_db = None,
                     exclusivePairs = pairs):
     """Function to calculate what proportion of the genome is covered by each
     of the respective labels and subsequenly normalize the df by these
@@ -636,11 +636,11 @@ def normalizeLabels(df, out_strandedFeats, out_db = None, fasta = None,
         The df of measured SNR labels to be normalized.
     out_strandedFeats : (str)
         The location of the PKL file containing the dict of flattened feats.
+    fasta : (str)
+        The location of the FASTA reference sequence file. The default is None.
     out_db : (str), optional
         The location of the reference annotation database file. The default is
         None.
-    fasta : (str), optional
-        The location of the FASTA reference sequence file. The default is None.
     exclusivePairs : (list), optional
         A list of tuples with features and the respective labels assigned to
         mark their absence, such that [ (feature, label) ]. The default is
