@@ -10,6 +10,7 @@ import pysam
 import gffutils
 import logging
 import numpy as np
+from Bio import SeqIO
 from collections import defaultdict
 from IPython.display import clear_output
 from functools import partial
@@ -331,6 +332,224 @@ def getCovPerSNR(out_SNRCovLen, out_SNROutl, lenToSNRs, out_db,
                 f'{zeroCovs / totalCount:.2%} SNRs had no coverage.')
     
     return covByLen, outlierPeaks
+
+
+def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
+                    base = 'A', minSNRlen = 5, mism = 0, window = 2000,
+                    concordant = True, SNRfeat = 'transcript'):
+    """Obtain RNA-seq coverage in the vicinity of SNRs of given length by
+    scanning the reference genome.
+    
+    Parameters
+    ----------
+    out_SNRCovLen : (str)
+        Path to the file with per-SNR coverage by length.
+    fasta : (str)
+        Path to the reference fasta file.
+    out_db : (str)
+        Path to the file with the database.
+    out_strandedFeats : (str)
+        Path to the file with stranded feats.
+    bamfile : (str)
+        Path to the (pre-filtered) bamfile.
+    base : (str), optional
+        DNA base constituting SNRs to be searched for: 'A', 'T', 'C', 'G', 'N'.
+        The default is 'A'.
+    minSNRlen : (int), optional
+        The shortest SNR length to consider. The default is 5.
+    mism : (int), optional
+        The maximum number of mismatches in an SNR allowed. The default is 0.
+    window : (int), optional
+        Total size of the window around the SNR covered. The default is 2000.
+    concordant : (bool), optional
+        Switch between concordant & discordant coverage. The default is True.
+    SNRfeat : (str), optional
+        The feature by which SNRs are selected. The default is 'transcript'.
+
+    Returns
+    -------
+    normCovByLen : (dict)
+        { length : ( SNRcount, SNRzeroCount, np.array ) }
+    """
+    
+    # If the file already exists, simply load
+    if os.path.isfile(out_SNRCovLen):
+        normCovByLen = loadPKL(out_SNRCovLen)
+        return normCovByLen
+    
+    def mayAddCoverage():
+        """A helper function that adds an SNR coverage if the length condition
+        is met. Similar to the helper function in findSNRsWmisms() but adds SNR
+        coverage instead of SNRs.
+        """
+        nonlocal covByLen, lastBlockSaved, totalCount, zeroCovs
+        
+        first = blocks[0][0]
+        last = blocks[-1][-1]
+        length = last - first
+        # If minSNRlen has been met, add the SNR coverage into the output dict
+        #  and mark the last block as saved
+        if length >= minSNRlen:
+            # Determine the range of the coverage sought
+            edge = first if strd else last
+            start = edge - window / 2
+            stop = edge + window / 2
+            # Include corrections for the start & end if the window falls out
+            #  of the feature size range
+            corrStart = max(0, start)
+            corrStop = min(stop, featLen)
+            # Get the coverage summed over A/T/C/G; count only reads on the
+            #  same (conc) or opposite (disc) strand
+            refCov = np.sum(
+                bam.count_coverage(contig = ref,
+                                   start = corrStart,
+                                   stop = corrStop,
+                                   quality_threshold = 0,
+                                   read_callback = lambda r:
+                                       r.is_reverse != (strd == concordant)),
+                axis = 0)
+            # If this is zero coverage, only add the counts
+            if sum(refCov) == 0:
+                zeroCovs += 1
+                # If the length does not yet exist, initiate, otherwise add
+                if length not in covByLen.keys():
+                    covByLen[length]['SNRcount'] = 1
+                    covByLen[length]['zeros'] = 1
+                    covByLen[length]['coverage'] = np.zeros(window, 'L')
+                else:
+                    covByLen[length]['SNRcount'] += 1
+                    covByLen[length]['zeros'] += 1
+            # Otherwise add the coverage found
+            else:                    
+                # If the window was out of ref range, fill in the rest with 0s
+                if corrStart != start:
+                    refCov = np.append(np.zeros((corrStart - start), 'L'),
+                                       refCov)
+                if corrStop != stop:
+                    refCov = np.append(refCov,
+                                       np.zeros((stop - corrStop), 'L'))
+                # If needed, flip the coverage to be in the 5'->3' orientation
+                #  wrt/ the transcript feature
+                refCov = refCov if strd else refCov[::-1]
+                # If the length does not yet exist, initiate, otherwise add
+                if length not in covByLen.keys():
+                    covByLen[length]['SNRcount'] = 1
+                    covByLen[length]['zeros'] = 0
+                    covByLen[length]['coverage'] = refCov
+                else:
+                    covByLen[length]['SNRcount'] += 1
+                    covByLen[length]['coverage'] += refCov
+            # Add to the total and confirm
+            totalCount += 1
+            lastBlockSaved = True
+    
+    # Handling of non-caps in the sequence
+    capsDict = {'A':{'a', 'A'},
+                'T':{'t', 'T'},
+                'C':{'c', 'C'},
+                'G':{'g', 'G'},
+                'N':{'n', 'N'}}
+    # Handling of complementary bases for '-' strd
+    compDict = {'A':'T', 'T':'A', 'C':'G', 'G':'C', 'N':'N'}
+    
+    # Load the file with stranded feats
+    flatFeats = getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db,
+                                          (SNRfeat, ))
+    # Get the expected coverage
+    expCov = getExpectedCoverage(out_db, out_strandedFeats, bamfile,
+                                 concordant = concordant,
+                                 baselineFeat = SNRfeat)
+    # Connect to the fasta reference
+    if minSNRlen is not None:
+        recDict = SeqIO.index(fasta, 'fasta')
+    # Attach a pre-filtered bam file
+    bam = pysam.AlignmentFile(bamfile, 'rb')
+    
+    # Initialize the dict and counts to collect all the data
+    covByLen = defaultdict(dict)
+    totalCount = 0
+    zeroCovs = 0
+    # Go over the feats by strand and ref
+    for strd, featsByRef in flatFeats[SNRfeat].items():
+        # Set the base of interest based on the strand
+        boi = base if strd else compDict[base]
+        # Allow for either caps to be included
+        eitherCaps = capsDict[boi]
+        for ref, feats in featsByRef.items():
+            logger.info('Going over '
+                        f'{"concordant" if concordant else "discordant"} '
+                        f'coverage around SNR{minSNRlen}+ on {SNRfeat}s on '
+                        f'{ref}{"+" if strd else "-"}...')
+            seq = str(recDict[ref].seq)
+            for fStart, fEnd in feats:
+                # Initiate the mismatch counter
+                nMism = 0
+                # Initiate the list of valid base blocks
+                blocks = []
+                # Initiate the indicator of being in a block
+                blocked = False
+                # Initiate the indicator of having saved an SNR coverage
+                #  with the last block
+                lastBlockSaved = True
+                # Scanning the sequence, while adding and removing blocks
+                featSeq = seq[fStart:fEnd]
+                featLen = len(featSeq)
+                for i, bp in enumerate(featSeq):
+                    # If this is boi but block has not been started, start one
+                    #  (if currently in a block, just pass onto the next base
+                    #  - the two conditions below cannot be merged into one)
+                    if bp in eitherCaps:
+                        if not blocked:
+                            start = i
+                            blocked = True
+                    else:
+                        # If a block just ended, add it
+                        if blocked:
+                            blocks.append((start, i))
+                            lastBlockSaved = False
+                            blocked = False
+                        # Count the mismatch only if inside a potential SNR
+                        if blocks:
+                            nMism += 1
+                            # If mism has been exceeded, an SNR may be added;
+                            #  always remove the 1st block & decrease the mism
+                            if nMism > mism:
+                                # Only save the SNR if the most recent block
+                                #  hasn't been saved in an SNR yet (if it has,
+                                #  it implies that this would not be the
+                                #  longest SNR possible)
+                                if not lastBlockSaved:
+                                    mayAddCoverage()
+                                # Deduct all mismatches before the 2nd block
+                                if len(blocks) > 1:
+                                    nMism -= blocks[1][0] - blocks[0][-1]
+                                else:
+                                    nMism = 0
+                                # Remove the 1st block
+                                blocks = blocks[1:]
+                # Once the sequence scanning is done, the last SNR may be added
+                #  even if the mism # has not been reached
+                # If the sequence ended in a block, add it
+                if blocked:
+                    blocks.append((start, i+1))
+                    lastBlockSaved = False
+                # If the last block has not been saved, an SNR may be added
+                if blocks and not lastBlockSaved:
+                    mayAddCoverage()
+    bam.close()
+    
+    # Normalize by the expected coverage for the given feature
+    normCovByLen = {}
+    for length, covDict in covByLen.items():
+        normCovByLen[length] = {'SNRcount': covDict['SNRcount'],
+                                'zeros': covDict['zeros'],
+                                'coverage': covDict['coverage'] / expCov}
+    
+    logger.info(f'Detected coverage for {totalCount:,d} SNRs on {SNRfeat}s,'
+                f'of which {zeroCovs / totalCount:.1%} had no coverage.')
+    savePKL(out_SNRCovLen, normCovByLen)
+    
+    return normCovByLen
 
 
 def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
@@ -894,7 +1113,7 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     # This is binarized wrt/ the expected coverage: >= / <
     # This information also can be used to calculate Sens and Spec
     
-    logger.info(f'Checking transcript ends of length {endLength}...')
+    logger.info(f'Checking transcript ends of length {endLength:,d}...')
     
     # Initialize the baseline data
     covTransByStrdRef, Pos, Neg = BLdata
@@ -976,7 +1195,7 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     if not 0 <= specificity <= 1:
         raise ValueError(f'Specificity is {specificity}.')
     
-    logger.info(f'Processed transcript ends of length {endLength}.')
+    logger.info(f'Processed transcript ends of length {endLength:,d}.')
     
     return TP, FN, TN, FP, eachTransStartByStrdRef
 

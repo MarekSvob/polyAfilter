@@ -158,11 +158,7 @@ def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
     
     # Calculate the frequency of the base in question and its complement
     pBase = sum(bases[cap] for cap in capsDict[base]) / sumKnownBases
-    # pBase = (bases[capsDict[base][0]]     # capsDict changed to dict(sets)
-    #          + bases[capsDict[base][1]]) / sumKnownBases
     pComp = sum(bases[cap] for cap in capsDict[compDict[base]]) / sumKnownBases
-    # pComp = (bases[capsDict[compDict[base]][0]]
-    #          + bases[capsDict[compDict[base]][1]]) / sumKnownBases
     
     # Obtain the table data as a list of 3 respective lists: SNRlength,
     #  Observed absolute # of SNRs, and O/E ratio
@@ -176,6 +172,7 @@ def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
                   / ((1-pBase) * pBase**int(k) * (1-pBase)
                      + (1-pComp) * pComp**int(k) * (1-pComp)))
     table_data = [polyLen, obs, oe]
+    
     # Construct the df with the desired column names & types
     df = pd.DataFrame(data = pd.DataFrame(data = table_data).T)
     df.columns = ('SNR Length','Observed', 'O/E')
@@ -297,10 +294,12 @@ def SNRlabelProps(lenToFeats, exclusivePairs = None, other = 'Exon',
         exclusivePairs = [('gene', 'Intergenic'),
                           ('transcript', 'Regulatory'),
                           ('exon', 'Intron')]
+        
     # Initiate the data matrix of zeros, SNRlength x label
     SNRlabels_data = np.zeros(
         (max(lenToFeats.keys()) + 1, len(exclusivePairs) + 1),
         dtype = int)
+    
     # For each length, add up the feats corresponding to the respective labels
     for length, featureCounts in lenToFeats.items():
         for featureSet, count in featureCounts.items():
@@ -311,12 +310,15 @@ def SNRlabelProps(lenToFeats, exclusivePairs = None, other = 'Exon',
             else:
                 index = len(exclusivePairs)
             SNRlabels_data[length, index] += count
+            
     # Derive the labels from the input
     colNames = [p[1] for p in exclusivePairs] + [other]
     df = pd.DataFrame(data = SNRlabels_data, columns = colNames)
+    
     # Remove all the lengths that have less than minSNRs in them
     df.drop(labels = [i for i in df.index if df.sum(axis = 1)[i] < minSNRs],
             axis = 0, inplace = True)
+    
     # Get proportions, instead of absolute values, for each SNR length
     props = df.values / df.values.sum(axis = 1)[:, np.newaxis]
     df_p = pd.DataFrame(data = props, columns = df.columns, index = df.index)
@@ -569,7 +571,6 @@ def nonOverlapCheck(intervals):
         else:
             oldEnd = newEnd
         
-
 
 def getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db, featsOfInterest):
     """Function to scan the GTF file and flatten the feats, preserving their
