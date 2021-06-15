@@ -21,11 +21,6 @@ logging.basicConfig(level = logging.INFO,
                     format = '%(asctime)s - %(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
-# Default exclusivePairs
-pairs = [('gene', 'Intergenic'),
-         ('transcript', 'Regulatory'),
-         ('exon', 'Intron')]
-
 
 def getBaseComp(out_bases, fasta = None, showGC = True):
     """Function to obtain the base composition of a genome by scanning. Once
@@ -229,7 +224,7 @@ def SNRfeatureSets(lenToFeats):
     return df
 
 
-def getColNames(df, exclusivePairs = pairs, other = 'Exon'):
+def getColNames(df, exclusivePairs = None, other = 'Exon'):
     """Function to create a label to each df column (featureSet) according to
     the exclusivePairs - i.e., if feature is absent, label is assigned.
     
@@ -250,6 +245,12 @@ def getColNames(df, exclusivePairs = pairs, other = 'Exon'):
         The list of df labels.
     """
     
+    # Set the exclusive pairs
+    if exclusivePairs is None:
+        exclusivePairs = [('gene', 'Intergenic'),
+                          ('transcript', 'Regulatory'),
+                          ('exon', 'Intron')]
+    
     named_cols = []
     # For each column (featureSet), check each feautre in order, one-by-one.
     for col in df.columns:
@@ -266,7 +267,8 @@ def getColNames(df, exclusivePairs = pairs, other = 'Exon'):
     return named_cols
 
 
-def SNRlabelProps(lenToFeats, exclusivePairs = pairs, other = 'Exon'):
+def SNRlabelProps(lenToFeats, exclusivePairs = None, other = 'Exon',
+                  minSNRs = 1):
     """Function that prepares a df of proportions of labeled SNRs for each
     length.    
 
@@ -280,6 +282,9 @@ def SNRlabelProps(lenToFeats, exclusivePairs = pairs, other = 'Exon'):
         [('gene','Intergenic'),('transcript','Regulatory'),('exon','Intron')].
     other : (str), optional
         The label given if all features are present. The default is 'Exon'.
+    minSNRs : (int), optional
+        All SNR lengths represented by fewer SNRs than this number will be
+        discarded. The default is 1.
 
     Returns
     -------
@@ -287,30 +292,31 @@ def SNRlabelProps(lenToFeats, exclusivePairs = pairs, other = 'Exon'):
         Table of proportions of labeled SNRs for each length.
     """
     
+    # Set the exclusive pairs
+    if exclusivePairs is None:
+        exclusivePairs = [('gene', 'Intergenic'),
+                          ('transcript', 'Regulatory'),
+                          ('exon', 'Intron')]
     # Initiate the data matrix of zeros, SNRlength x label
     SNRlabels_data = np.zeros(
         (max(lenToFeats.keys()) + 1, len(exclusivePairs) + 1),
         dtype = int)
-    
     # For each length, add up the feats corresponding to the respective labels
     for length, featureCounts in lenToFeats.items():
         for featureSet, count in featureCounts.items():
-            for i in range(len(exclusivePairs)):
-                if exclusivePairs[i][0] not in featureSet:
+            for i, exclusivePair in enumerate(exclusivePairs):
+                if exclusivePair[0] not in featureSet:
                     index = i
                     break
             else:
                 index = len(exclusivePairs)
             SNRlabels_data[length, index] += count
-
     # Derive the labels from the input
-    colNames = [p[1] for p in exclusivePairs]
-    colNames.append(other)
+    colNames = [p[1] for p in exclusivePairs] + [other]
     df = pd.DataFrame(data = SNRlabels_data, columns = colNames)
-    # Remove all the lengths that have less than 10 SNRs in them
-    df.drop(labels = [i for i in df.index if df.sum(axis = 1)[i] in range(10)],
-            axis = 0,
-            inplace = True)
+    # Remove all the lengths that have less than minSNRs in them
+    df.drop(labels = [i for i in df.index if df.sum(axis = 1)[i] < minSNRs],
+            axis = 0, inplace = True)
     # Get proportions, instead of absolute values, for each SNR length
     props = df.values / df.values.sum(axis = 1)[:, np.newaxis]
     df_p = pd.DataFrame(data = props, columns = df.columns, index = df.index)
@@ -624,7 +630,7 @@ def getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db, featsOfInterest):
     
 
 def normalizeLabels(df, out_strandedFeats, fasta, out_db = None,
-                    exclusivePairs = pairs):
+                    exclusivePairs = None):
     """Function to calculate what proportion of the genome is covered by each
     of the respective labels and subsequenly normalize the df by these
     proportions. If the flattened feats have not been processed previously,
@@ -651,6 +657,12 @@ def normalizeLabels(df, out_strandedFeats, fasta, out_db = None,
     df_norm : (dataframe)
         Normalized dataframe
     """
+    
+    # Set the exclusive pairs
+    if exclusivePairs is None:
+        exclusivePairs = [('gene', 'Intergenic'),
+                          ('transcript', 'Regulatory'),
+                          ('exon', 'Intron')]
     
     # Extract the features of interest
     featsOfInterest = [p[0] for p in exclusivePairs]
