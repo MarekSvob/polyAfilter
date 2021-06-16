@@ -364,7 +364,8 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
     concordant : (bool), optional
         Switch between concordant & discordant coverage. The default is True.
     SNRfeat : (str), optional
-        The feature by which SNRs are selected. The default is 'transcript'.
+        The feature by which SNRs are selected and to which the read depth will
+        be normalized. The default is 'transcript'.
 
     Returns
     -------
@@ -553,7 +554,7 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
 
 
 def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
-                  window = 2000, concordant = True):
+                  window = 2000, concordant = True, normFeat = 'exon'):
     """Function that aggregates all per-transcript coverage.
 
     Parameters
@@ -570,6 +571,9 @@ def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
         Total size of the window around the SNR covered. The default is 2000.
     concordant : (bool), optional
         Determines which strand the alignments come from (fwd vs. rev).
+    normFeat : (str), optional
+        The feature where SNRs will be sought and to which the coverage will be
+        normalized.
 
     Returns
     -------
@@ -585,7 +589,7 @@ def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
     # Get the expected coverage
     expCov = getExpectedCoverage(out_db, out_strandedFeats, exonic_bamfile,
                                  concordant = concordant,
-                                 baselineFeat = 'transcript')
+                                 baselineFeat = normFeat)
     
     # In most cases, this should just load a file
     flatFeats = getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db,
