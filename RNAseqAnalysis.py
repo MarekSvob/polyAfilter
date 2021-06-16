@@ -392,8 +392,8 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
         if length >= minSNRlen:
             # Determine the range of the coverage sought
             edge = first if strd else last
-            start = edge - window / 2
-            stop = edge + window / 2
+            start = int(edge - window / 2)
+            stop = int(edge + window / 2)
             # Include corrections for the start & end if the window falls out
             #  of the feature size range
             corrStart = max(0, start)
