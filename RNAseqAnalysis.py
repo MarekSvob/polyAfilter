@@ -385,8 +385,9 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
         """
         nonlocal covByLen, lastBlockSaved, totalCount, zeroCovs
         
-        first = blocks[0][0]
-        last = blocks[-1][-1]
+        # Add the feature start to work with reference coordinates
+        first = blocks[0][0] + fStart
+        last = blocks[-1][-1] + fStart
         length = last - first
         # If minSNRlen has been met, add the SNR coverage into the output dict
         #  and mark the last block as saved
@@ -396,9 +397,9 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
             start = int(edge - window / 2)
             stop = int(edge + window / 2)
             # Include corrections for the start & end if the window falls out
-            #  of the feature size range
+            #  of the reference size range
             corrStart = max(0, start)
-            corrStop = min(stop, featLen)
+            corrStop = min(stop, refLen)
             # Get the coverage summed over A/T/C/G; count only reads on the
             #  same (conc) or opposite (disc) strand
             refCov = np.sum(
@@ -461,9 +462,8 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
                                  concordant = concordant,
                                  baselineFeat = SNRfeat)
     # Connect to the fasta reference
-    if minSNRlen is not None:
-        recDict = SeqIO.index(fasta, 'fasta')
-    # Attach a pre-filtered bam file
+    recDict = SeqIO.index(fasta, 'fasta')
+    # Attach the bam file
     bam = pysam.AlignmentFile(bamfile, 'rb')
     
     # Initialize the dict and counts to collect all the data
@@ -482,6 +482,7 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
                         f'coverage around SNR{minSNRlen}+ on {SNRfeat}s on '
                         f'{ref}{"+" if strd else "-"}...')
             seq = str(recDict[ref].seq)
+            refLen = len(seq)
             for fStart, fEnd in feats:
                 # Initiate the mismatch counter
                 nMism = 0
@@ -494,7 +495,6 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
                 lastBlockSaved = True
                 # Scanning the sequence, while adding and removing blocks
                 featSeq = seq[fStart:fEnd]
-                featLen = len(featSeq)
                 for i, bp in enumerate(featSeq):
                     # If this is boi but block has not been started, start one
                     #  (if currently in a block, just pass onto the next base
@@ -546,8 +546,9 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
                                 'zeros': covDict['zeros'],
                                 'coverage': covDict['coverage'] / expCov}
     
-    logger.info(f'Detected coverage for {totalCount:,d} SNRs on {SNRfeat}s,'
-                f'of which {zeroCovs / totalCount:.1%} had no coverage.')
+    logger.info(f'Detected coverage for {totalCount:,d} SNRs on {SNRfeat}s, '
+                f'of which {zeroCovs:,d} ({zeroCovs / totalCount:.2%}) '
+                'had no coverage.')
     savePKL(out_SNRCovLen, normCovByLen)
     
     return normCovByLen
