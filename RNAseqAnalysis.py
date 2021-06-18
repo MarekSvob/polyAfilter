@@ -336,7 +336,8 @@ def getCovPerSNR(out_SNRCovLen, out_SNROutl, lenToSNRs, out_db,
 
 def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
                     base = 'A', minSNRlen = 5, mism = 0, window = 2000,
-                    concordant = True, SNRfeat = 'transcript'):
+                    concordant = True, SNRfeat = 'transcript',
+                    log10Filter = None):
     """Obtain RNA-seq coverage in the vicinity of SNRs of given length by
     scanning the reference genome.
     
@@ -366,6 +367,10 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
     SNRfeat : (str), optional
         The feature by which SNRs are selected and to which the read depth will
         be normalized. The default is 'transcript'.
+    log10Filter : (int), optional
+        If coverage at any base around an SNR exceeds this power of 10 multiple
+        of the expected coverage, the SNR is discarded as an outlier. The
+        default is None.
 
     Returns
     -------
@@ -383,7 +388,7 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
         is met. Similar to the helper function in findSNRsWmisms() but adds SNR
         coverage instead of SNRs.
         """
-        nonlocal covByLen, lastBlockSaved, totalCount, zeroCovs
+        nonlocal covByLen, lastBlockSaved, totalCount, zeroCovs, totalOutliers
         
         # Add the feature start to work with reference coordinates
         first = blocks[0][0] + fStart
@@ -418,9 +423,23 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
                     covByLen[length]['SNRcount'] = 1
                     covByLen[length]['zeros'] = 1
                     covByLen[length]['coverage'] = np.zeros(window, 'L')
+                    covByLen[length]['outliers'] = 0
                 else:
                     covByLen[length]['SNRcount'] += 1
                     covByLen[length]['zeros'] += 1
+                # Add to the total
+                totalCount += 1
+            # If this is an outlier, discard the coverage & count
+            elif (log10Filter is not None) and (
+                    (max(refCov) / expCov) > 10**log10Filter):
+                if length not in covByLen.keys():
+                    covByLen[length]['SNRcount'] = 0
+                    covByLen[length]['zeros'] = 0
+                    covByLen[length]['coverage'] = np.zeros(window, 'L')
+                    covByLen[length]['outliers'] = 1
+                else:
+                    covByLen[length]['outliers'] += 1
+                totalOutliers += 1
             # Otherwise add the coverage found
             else:                    
                 # If the window was out of ref range, fill in the rest with 0s
@@ -438,11 +457,12 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
                     covByLen[length]['SNRcount'] = 1
                     covByLen[length]['zeros'] = 0
                     covByLen[length]['coverage'] = refCov
+                    covByLen[length]['outliers'] = 0
                 else:
                     covByLen[length]['SNRcount'] += 1
                     covByLen[length]['coverage'] += refCov
-            # Add to the total and confirm
-            totalCount += 1
+                # Add to the total
+                totalCount += 1
             lastBlockSaved = True
     
     # Handling of non-caps in the sequence
@@ -454,13 +474,13 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
     # Handling of complementary bases for '-' strd
     compDict = {'A':'T', 'T':'A', 'C':'G', 'G':'C', 'N':'N'}
     
-    # Load the file with stranded feats
-    flatFeats = getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db,
-                                          (SNRfeat, ))
     # Get the expected coverage
     expCov = getExpectedCoverage(out_db, out_strandedFeats, bamfile,
                                  concordant = concordant,
                                  baselineFeat = SNRfeat)
+    # Load the file with stranded feats
+    flatFeats = getFlatFeatsByTypeStrdRef(out_strandedFeats, out_db,
+                                          (SNRfeat, ))
     # Connect to the fasta reference
     recDict = SeqIO.index(fasta, 'fasta')
     # Attach the bam file
@@ -470,6 +490,7 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
     covByLen = defaultdict(dict)
     totalCount = 0
     zeroCovs = 0
+    totalOutliers = 0
     # Go over the feats by strand and ref
     for strd, featsByRef in flatFeats[SNRfeat].items():
         # Set the base of interest based on the strand
@@ -546,16 +567,17 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
                                 'zeros': covDict['zeros'],
                                 'coverage': covDict['coverage'] / expCov}
     
-    logger.info(f'Detected coverage for {totalCount:,d} SNRs on {SNRfeat}s, '
+    logger.info(f'Saved coverage for {totalCount:,d} SNRs on {SNRfeat}s, '
                 f'of which {zeroCovs:,d} ({zeroCovs / totalCount:.2%}) '
-                'had no coverage.')
+                f'had no coverage. {totalOutliers:,d} outliers that exceeded '
+                f'{10**log10Filter:,d}x the expected coverage were discarded.')
     savePKL(out_SNRCovLen, normCovByLen)
     
     return normCovByLen
 
 
 def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
-                  window = 2000, concordant = True, normFeat = 'exon'):
+                  window = 2000, concordant = True, normFeat = 'transcript'):
     """Function that aggregates all per-transcript coverage.
 
     Parameters
@@ -574,7 +596,7 @@ def getCovPerTran(out_TranCov, out_db, out_strandedFeats, exonic_bamfile,
         Determines which strand the alignments come from (fwd vs. rev).
     normFeat : (str), optional
         The feature where SNRs will be sought and to which the coverage will be
-        normalized.
+        normalized. The default is 'transcript'.
 
     Returns
     -------
