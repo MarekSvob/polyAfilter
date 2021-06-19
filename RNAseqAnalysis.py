@@ -565,7 +565,8 @@ def getCovPerSNRlen(out_SNRCovLen, fasta, out_db, out_strandedFeats, bamfile,
     for length, covDict in covByLen.items():
         normCovByLen[length] = {'SNRcount': covDict['SNRcount'],
                                 'zeros': covDict['zeros'],
-                                'coverage': covDict['coverage'] / expCov}
+                                'coverage': covDict['coverage'] / expCov,
+                                'outliers': covDict['outliers']}
     
     logger.info(f'Saved coverage for {totalCount:,d} SNRs on {SNRfeat}s, '
                 f'of which {zeroCovs:,d} ({zeroCovs / totalCount:.2%}) '
