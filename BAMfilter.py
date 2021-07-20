@@ -1433,29 +1433,30 @@ def spBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
     if cbFile:
         cbFileFilter(toRemove, cbFile, out_cbFile, verbose)   
     
-    logger.info('Loading all the alignments from the original BAM file...')
     # Create the bamfile and add the reads not in the toRemove set
     # Manually reopen the bam file to avoid multiple iterators issues
     bamIN = pysam.AlignmentFile(bamfile, 'rb')   
     # Get the total number of reads in the indexed bam file
     total = bamIN.mapped + bamIN.unmapped
-    # Write the new bam file
-    bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bamIN)
-    
-    allAlignments = {a for a in bamIN.fetch(until_eof = True)}
-    bamIN.close()
-    nAll = len(allAlignments)
-    
-    logger.info('Extracting the alignments to be kept...')
-    toKeep = allAlignments - toRemove
-    included = len(toKeep)
-    
     logger.info(f'Writing the filtered BAM file, to exclude {toRemoveN:,d} '
                 f'alignments out of {total:,d} total...')
-    for alignment in toKeep:
-        bamOUT.write(alignment)
+    # Write the new bam file
+    bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bamIN)
+    nAll = 0
+    included = 0
+    for alignment in bamIN.fetch(until_eof = True):
+        nAll += 1
+        if alignment not in toRemove:
+            bamOUT.write(alignment)
+            included += 1
+            
+        if not nAll % 10000000 and nAll and verbose:
+            logger.info(f'Processed {nAll:,d} input alignments, of which '
+                        f'{nAll-included:,d} were excluded...')
+            
+    # Close the files
+    bamIN.close()
     bamOUT.close()
-    
     logger.info(f'A filtered BAM file with {included:,d}/{nAll:,d} alignments '
                 f'has been created. [Excluded {nAll-included:,d} alignments '
                 f'{covLen:,d} bp upstream of non-terminal SNR{minSNRlen}+.]')
