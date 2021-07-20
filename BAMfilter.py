@@ -1173,7 +1173,7 @@ def fetchToKeepScanToRemove(covLen, refName, strd, minSNRlen, bamfile,
     if verbose:
         logger.info('Identifying alignments to be removed on reference '
                     f'{refName}{"+" if strd else "-"}...')
-    counter = 0
+    
     tempFile = f'{out_bamfile}_{strd}_{refName}.bam'
     
     # Initialize the set of alignments to be removed
@@ -1193,7 +1193,7 @@ def fetchToKeepScanToRemove(covLen, refName, strd, minSNRlen, bamfile,
                                       [(start, end)])
                 if mapping != []:
                     toRemove.add(alignment)
-                    counter += 1
+    toRemoveN = len(toRemove)
     
     # Identify all terminal transcripts that at least overlap the transcript
     #  ends to protect them
@@ -1213,6 +1213,7 @@ def fetchToKeepScanToRemove(covLen, refName, strd, minSNRlen, bamfile,
                                       [(start, end)])
                 if mapping != []:
                     toProtect.add(alignment)
+    toProtectN = len(toProtect)
     
     bamTEMP = pysam.AlignmentFile(tempFile, 'wb', template = bam)
     bam.close()
@@ -1222,20 +1223,24 @@ def fetchToKeepScanToRemove(covLen, refName, strd, minSNRlen, bamfile,
                     f'{refName}{"+" if strd else "-"}...')
     toRemove -= toProtect
     
+    removedN = len(toRemove)
     for alignment in toRemove:
         bamTEMP.write(alignment)
     bamTEMP.close()
     
     if verbose:
-        logger.info(f'Identified {counter:,d} alignments to be removed on '
-                    f'reference {refName}{"+" if strd else "-"} and saved to '
-                    f'{tempFile}.')
+        logger.info(f'Alignments to be removed from {refName}'
+                    f'{"+" if strd else "-"} were saved to {tempFile}:\n'
+                    f'Identified to remove: {toRemoveN:,d}\n'
+                    f'Identified to protect: {toProtectN:,d}\n'
+                    f'Removed: {removedN:,d} (Protected: '
+                    f'{toProtectN-removedN:,d})')
     
 
 def spBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
-                  out_db, base = 'A', mism = 0, out_bamfile = None, tROC = {},
-                  includeIntrons = False, cbFile = None, out_cbFile = None,
-                  weightedCov = True, verbose = False, nThreads = None):
+                out_db, base = 'A', mism = 0, out_bamfile = None, tROC = {},
+                includeIntrons = False, cbFile = None, out_cbFile = None,
+                weightedCov = True, verbose = False, nThreads = None):
     """Version of scanBAMfilter() that, in addition to protecting (removing)
     the terminal end pieces of each expressed transcript, also specifically
     protects all transcripts that even just overlap them (not those that are
