@@ -528,7 +528,8 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
             func = parallel_wrapper,
             args = (covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
                     out_transBaselineData, out_db, out_bamfile, tROC,
-                    includeIntrons, sortedSNRs, weightedCov, verbose, nThreads))
+                    includeIntrons, sortedSNRs, weightedCov, verbose,
+                    nThreads))
         # Close the pool
         pool.close()
         # Join the processes
@@ -1097,3 +1098,360 @@ def scanBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
     logger.info(f'A filtered BAM file with {included:,d}/{nAll:,d} alignments '
                 f'has been created. [Excluded {nAll-included:,d} alignments '
                 f'{covLen:,d} bp upstream of non-terminal SNR{minSNRlen}+.]')
+    
+
+def fetchToKeepScanToRemove(covLen, refName, strd, minSNRlen, bamfile,
+                            out_bamfile, fastafile, eachTransStart,
+                            allTransEnds, base = 'A', mism = 0,
+                            verbose = True):
+    """Function equivalent to scanForAlignmentsToRemove() but additionally
+    specifically identifies the alignments to keep.
+    Helper function to run on each thread for a multithreaded scanning and
+    alignment identification and writing into temporary files to be merged
+    later.
+    
+    Parameters
+    ----------
+    covLen : (int)
+        The assumed distance between the beginning of alignment coverage and
+        the priming event.
+    refName : (str)
+        Name of the reference to scan.
+    strd : (bool)
+        Strand of the reference; +(True) / -(False)
+    minSNRlen : (int, None)
+        The shortest SNR length to consider. If None, remove all non-end
+        coverage.
+    bamfile : (str)
+        Location of the sorted and indexed bamfile to be filtered.
+    out_bamfile : (str)
+        Location of the resulting filtered bamfile.
+    fastafile : (str)
+        Location of the reference genome fasta file.
+    eachTransStart : (tuple)
+        Tuple of trans start pieces such that
+        (((start, end), (start, end), ...), ((start, end), (start, end), ...))
+    allTransEnds: (list)
+        A list of trans end pieces flattened across the given reference:
+        [(start, end), (start, end), ...]
+    base : (str), optional
+        DNA base constituting SNRs to be searched for: 'A', 'T', 'C', 'G', 'N'.
+        The default is 'A'.
+    mism : (int), optional
+        The maximum number of mismatches in an SNR allowed. The default is 0.
+    verbose : (bool), optional
+        Indicates whether extra messages are logged. The default is False.
+    
+    Returns
+    -------
+    None.
+    """        
+    
+    # Flatten all the expressed transcript starts on this strd/ref
+    flatStarts = []
+    for tStart in eachTransStart:
+        flatStarts.extend(tStart)
+    flatStarts = flattenIntervals(flatStarts)
+    # minSNRlen = None means that all non-end coverage is removed,
+    #  regardless of SNR pieces
+    if minSNRlen is None:
+        SNRpieces = flatStarts
+    else:
+        # Scan for and flatten all the relevant SNR pieces
+        if verbose:
+            logger.info('Looking for segments on reference '
+                        f'{refName}{"+" if strd else "-"}...')
+        recDict = SeqIO.index(fastafile, 'fasta')
+        SNRpieces = findSNRpieces(
+            covLen = covLen, seq = str(recDict[refName].seq),
+            strd = strd, base = base, mism = mism,
+            minSNRlen = minSNRlen)
+        SNRpieces = flattenIntervals(SNRpieces)
+        # Find overlaps between SNRpieces & tStarts
+        SNRpieces = getOverlaps(flatStarts, SNRpieces)
+    # Go over all the pieces to fetch the alignments & write them into a temp
+    if verbose:
+        logger.info('Identifying alignments to be removed on reference '
+                    f'{refName}{"+" if strd else "-"}...')
+    counter = 0
+    tempFile = f'{out_bamfile}_{strd}_{refName}.bam'
+    
+    # Initialize the set of alignments to be removed
+    toRemove = set()
+    # Connect to the bam file and create a new one
+    bam = pysam.AlignmentFile(bamfile, 'rb')
+
+    for start, end in SNRpieces:
+        for alignment in bam.fetch(
+                contig = refName, start = start, stop = end):
+            # Ensure the alignment is on the correct strd
+            if alignment.is_reverse != strd:
+                # Make sure that filtered alignments indeed map to
+                #  the area identified, not just overlap it with
+                #  their start-end range (in case of splicing)
+                mapping = getOverlaps(alignment.get_blocks(),
+                                      [(start, end)])
+                if mapping != []:
+                    toRemove.add(alignment)
+                    counter += 1
+    
+    # Identify all terminal transcripts that at least overlap the transcript
+    #  ends to protect them
+    if verbose:
+        logger.info('Identifying alignments to be protected on reference '
+                    f'{refName}{"+" if strd else "-"}...')
+    toProtect = set()
+    for start, end in allTransEnds:
+        for alignment in bam.fetch(
+                contig = refName, start = start, stop = end):
+            # Ensure the alignment is on the correct strd
+            if alignment.is_reverse != strd:
+                # Make sure that filtered alignments indeed map to the area
+                #  identified, not just overlap it with their start-end range
+                #  (in case of splicing)
+                mapping = getOverlaps(alignment.get_blocks(),
+                                      [(start, end)])
+                if mapping != []:
+                    toProtect.add(alignment)
+    
+    bamTEMP = pysam.AlignmentFile(tempFile, 'wb', template = bam)
+    bam.close()
+    
+    if verbose:
+        logger.info('Protecting terminal alignments on reference '
+                    f'{refName}{"+" if strd else "-"}...')
+    toRemove -= toProtect
+    
+    for alignment in toRemove:
+        bamTEMP.write(alignment)
+    bamTEMP.close()
+    
+    if verbose:
+        logger.info(f'Identified {counter:,d} alignments to be removed on '
+                    f'reference {refName}{"+" if strd else "-"} and saved to '
+                    f'{tempFile}.')
+    
+
+def spBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
+                  out_db, base = 'A', mism = 0, out_bamfile = None, tROC = {},
+                  includeIntrons = False, cbFile = None, out_cbFile = None,
+                  weightedCov = True, verbose = False, nThreads = None):
+    """Version of scanBAMfilter() that, in addition to protecting (removing)
+    the terminal end pieces of each expressed transcript, also specifically
+    protects all transcripts that even just overlap them (not those that are
+    just completely contained within them).
+    Filters an indexed BAM file to remove non-canonical alignments that likely
+    resulted from poly(dT) priming onto genomically encoded polyA single
+    nucleotide repeats (SNRs), as opposed to mRNA polyA tails. Note that
+    parallel processing will produce the following warning for each temp file,
+    which can be safely ignored:
+        "[E::idx_find_and_load] Could not retrieve index file for <file>"
+    
+    Parameters
+    ----------
+    covLen : (int)
+        The assumed distance between the beginning of alignment coverage and
+        the priming event.
+    minSNRlen : (int, None)
+        The shortest SNR length to consider. If None, remove all non-end
+        coverage.
+    bamfile : (str)
+        Location of the sorted and indexed bamfile to be filtered.
+    fastafile : (str)
+        Location of the reference genome fasta file.
+    out_transBaselineData : (str)
+        Path to the saved baseline data, if done before.
+    out_db : (str)
+        Path to the saved GTF/GFF database.
+    base : (str), optional
+        DNA base constituting SNRs to be searched for: 'A', 'T', 'C', 'G', 'N'.
+        The default is 'A'.
+    mism : (int), optional
+        The maximum number of mismatches in an SNR allowed. The default is 0.
+    out_bamfile : (str, None), optional
+        Location of the resulting filtered bamfile. If None, the name of the
+        input bamfile name is used with '.filtered.bam' appended. The default
+        is None.
+    tROC : (dict), optional
+        { endLen : ( TP, FN, TN, FP, eachTransStartByStrdRef,
+                    allTransEndsByStrdRef ) }.
+        The default is {}.
+    includeIntrons : (bool), optional
+        Indicates whether to consider intron coverage. The default is False.
+    cbFile : (str, None), optional
+        Location of the scumi cell barcode count file, if any. The default is
+        None.
+    out_cbFile : (str, None), optional
+        Location of a new scumi cell barcode count file, if any. If None, the
+        cbFile name is used with '.filtered.tsv' appended. The default is None.
+    weightedCov : (bool), optional
+        Determines whether the covered bases are weighted by coverage amount
+        (i.e., coverage is summed). Only included for the purposes of using
+        cached baseline files; otherwise has no impact on the results of this
+        function. The default is True.
+    verbose : (bool), optional
+        Indicates whether extra messages are logged. The default is False.
+    nThreads : (int), optional
+        Set the maximum number of threads to use besides the main thread.
+        If None, serial processing is used. The default is None.
+    """
+    
+    # Initiate the correct output file name
+    if out_bamfile is None:
+        out_bamfile = bamfile + '.filtered.bam'
+    # If the BAM file already exists, do not overwrite
+    if os.path.isfile(out_bamfile):
+        logger.info(f'The filtered BAM file "{out_bamfile}" already exists.')
+        return
+        
+    # Initialize the set of alignments to be removed
+    toRemove = set()
+    
+    # Get transcript starts if N/A for this specific length
+    if covLen not in tROC:
+        BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
+                                 includeIntrons, weightedCov = weightedCov)
+        tROC[covLen] = getTransEndSensSpec(
+            covLen, bamfile, BLdata, includeIntrons, getSensSpec = False,
+            weightedCov = weightedCov)    
+    # Extract the transcript starts & ends for this coverage length
+    eachTransStartByStrdRef = tROC[covLen][4]   # By transcript
+    allTransEndsByStrdRef = tROC[covLen][5]     # Already flattened across ref
+    
+    if nThreads is None:
+        logger.info(f'Identifying alignments {covLen:,d} bp upstream of non-'
+                    f'terminal SNR{minSNRlen}+ with {mism} mismatches to be '
+                    'removed in 1 serial process...')
+        # Connect to the fasta reference if needed
+        if minSNRlen is not None:
+            recDict = SeqIO.index(fastafile, 'fasta')
+        
+        # Connect to the bam file
+        bam = pysam.AlignmentFile(bamfile, 'rb')
+        
+        # Initiate the set of all alignments to be protected
+        toProtect = set()
+        
+        # Go over each strand and ref separately to obtain overlaps with SNRs
+        for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
+            for refName, eachTransStart in eachTransStartByRef.items():
+                # Flatten all the expressed transcript starts on this strd/ref
+                flatStarts = []
+                for tStart in eachTransStart:
+                    flatStarts.extend(tStart)
+                flatStarts = flattenIntervals(flatStarts)
+                # minSNRlen = None means that all non-end coverage is removed,
+                #  regardless of SNR pieces
+                if minSNRlen is None:
+                    SNRpieces = flatStarts
+                else:
+                    # Scan for and flatten all the relevant SNR pieces
+                    if verbose:
+                        logger.info('Looking for segments on reference '
+                                    f'{refName}{"+" if strd else "-"}...')
+                    SNRpieces = findSNRpieces(
+                        covLen = covLen, seq = str(recDict[refName].seq),
+                        strd = strd, base = base, mism = mism,
+                        minSNRlen = minSNRlen)
+                    SNRpieces = flattenIntervals(SNRpieces)
+                    # Find overlaps between SNRpieces & tStarts
+                    SNRpieces = getOverlaps(flatStarts, SNRpieces)
+                # Fetch the alignments
+                if verbose:
+                    logger.info('Identifying alignments to be removed on refe'
+                                f'rence {refName}{"+" if strd else "-"}...')
+                for start, end in SNRpieces:
+                    for alignment in bam.fetch(
+                            contig = refName, start = start, stop = end):
+                        # Ensure the alignment is on the correct strd
+                        if alignment.is_reverse != strd:
+                            # Make sure that filtered alignments indeed map to
+                            #  the area identified, not just overlap it with
+                            #  their start-end range (in case of splicing)
+                            mapping = getOverlaps(alignment.get_blocks(),
+                                                  [(start, end)])
+                            if mapping != []:
+                                toRemove.add(alignment)
+                # Identify all terminal transcripts that at least overlap the
+                #  transcript ends to protect them
+                for start, end in allTransEndsByStrdRef[strd][refName]:
+                    for alignment in bam.fetch(
+                            contig = refName, start = start, stop = end):
+                        # Ensure the alignment is on the correct strd
+                        if alignment.is_reverse != strd:
+                            # Make sure that filtered alignments indeed map to
+                            #  the area identified, not just overlap it with
+                            #  their start-end range (in case of splicing)
+                            mapping = getOverlaps(alignment.get_blocks(),
+                                                  [(start, end)])
+                            if mapping != []:
+                                toProtect.add(alignment)
+        bam.close()
+        toRemove -= toProtect
+    
+    else:                
+        logger.info(f'Identifying alignments {covLen:,d} bp upstream of non-'
+                    f'terminal SNR{minSNRlen}+ to be removed across {nThreads} '
+                    'parallel processes and writing temporary files...')
+        # Set the number of threads for NumExpr (used by pandas & numpy)
+        os.environ['NUMEXPR_MAX_THREADS'] = str(nThreads)
+        # Create a pool of processes with shared variables
+        pool = multiprocessing.Pool(processes = nThreads)
+        # Identify the alignments to be removed by strand / ref
+        strdRefs = []
+        for strd, eachTransStartByRef in eachTransStartByStrdRef.items():
+            for refName, eachTransStart in eachTransStartByRef.items():
+                strdRefs.append((strd, refName))
+                pool.apply_async(func = fetchToKeepScanToRemove,
+                                 args = (covLen, refName, strd, minSNRlen,
+                                         bamfile, out_bamfile, fastafile,
+                                         eachTransStart,
+                                         allTransEndsByStrdRef[strd][refName],
+                                         base, mism, verbose))
+        # Close the pool
+        pool.close()
+        # Join the processes
+        pool.join()        
+        
+        # Merge the temporary files into 1 in-memory set & remove the files
+        logger.info(f'Merging {len(strdRefs)} temporary files into memory and '
+                    'deleting...')
+        for strand, ref in strdRefs:
+            tempfile = f'{out_bamfile}_{strand}_{ref}.bam'
+            bamTEMP = pysam.AlignmentFile(tempfile, 'rb')
+            toRemove.update({a for a in bamTEMP.fetch(until_eof = True)})
+            bamTEMP.close()
+            os.remove(tempfile)
+    
+    toRemoveN = len(toRemove)
+    # Filter the cbFile, if any
+    if cbFile:
+        cbFileFilter(toRemove, cbFile, out_cbFile, verbose)   
+    
+    logger.info('Loading all the alignments from the original BAM file...')
+    # Create the bamfile and add the reads not in the toRemove set
+    # Manually reopen the bam file to avoid multiple iterators issues
+    bamIN = pysam.AlignmentFile(bamfile, 'rb')   
+    # Get the total number of reads in the indexed bam file
+    total = bamIN.mapped + bamIN.unmapped
+    # Write the new bam file
+    bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bamIN)
+    
+    allAlignments = {a for a in bamIN.fetch(until_eof = True)}
+    bamIN.close()
+    nAll = len(allAlignments)
+    
+    logger.info('Extracting the alignments to be kept...')
+    toKeep = allAlignments - toRemove
+    included = len(toKeep)
+    
+    logger.info(f'Writing the filtered BAM file, to exclude {toRemoveN:,d} '
+                f'alignments out of {total:,d} total...')
+    for alignment in toKeep:
+        bamOUT.write(alignment)
+    bamOUT.close()
+    
+    logger.info(f'A filtered BAM file with {included:,d}/{nAll:,d} alignments '
+                f'has been created. [Excluded {nAll-included:,d} alignments '
+                f'{covLen:,d} bp upstream of non-terminal SNR{minSNRlen}+.]')
+

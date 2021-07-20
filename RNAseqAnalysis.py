@@ -1118,8 +1118,11 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
         The false positive rate of RNAseq coverage of transcript starts (sum
         of bps with no coverage).
     eachTransStartByStrdRef : (dict)
-        { strd : { refName : [ ( (start, end), ... ) ] } } for start exon
+        { strd : { refName : [ ( (start, end), ... ), ... ] } } for start exon
         pieces for each covered transcript.
+    allTransEndsByStrdRef : (dict)
+        { strd : { refName : [ (start, end), ... ] } } for flattened end exon
+        pieces across each reference.
     """
     # Notes:
     #
@@ -1157,6 +1160,7 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     
     # Initialize a dictionary to save transcript starts for later use:
     eachTransStartByStrdRef = defaultdict(lambda: defaultdict(list))
+    allTransEndsByStrdRef = defaultdict(dict)
     # Go over each strand and reference separately
     for strd, covTransByRef in covTransByStrdRef.items():
         for refname, trans in covTransByRef.items():
@@ -1190,8 +1194,9 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
                 allTransEndPieces.extend(transEndPieces)
                 if transStartPieces != []:
                     eachTransStart.append(tuple(transStartPieces))
-            # Flatten the allTransEndPieces
+            # Flatten the allTransEndPieces & add to the final dict
             allTransEndPieces = flattenIntervals(allTransEndPieces)
+            allTransEndsByStrdRef[strd][refname] = allTransEndPieces
             # Remove any overlaps of the starts with the ends
             for transStart in eachTransStart:
                 eachTransStartByStrdRef[strd][refname].append(
@@ -1225,7 +1230,7 @@ def getTransEndSensSpec(endLength, bamfile, BLdata, includeIntrons,
     
     logger.info(f'Processed transcript ends of length {endLength:,d}.')
     
-    return TP, FN, TN, FP, eachTransStartByStrdRef
+    return TP, FN, TN, FP, eachTransStartByStrdRef, allTransEndsByStrdRef
 
 
 def keyVal(key, d, meth):
