@@ -1234,7 +1234,7 @@ def fetchToKeepScanToRemove(covLen, refName, strd, minSNRlen, bamfile,
                     f'Identified to remove: {toRemoveN:,d}\n'
                     f'Identified to protect: {toProtectN:,d}\n'
                     f'Removed: {removedN:,d} (Protected: '
-                    f'{toProtectN-removedN:,d})')
+                    f'{toRemoveN-removedN:,d})')
     
 
 def spBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
