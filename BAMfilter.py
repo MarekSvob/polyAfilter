@@ -32,7 +32,7 @@ logging.basicConfig(level = logging.INFO,
 logger = logging.getLogger(__name__)
 
 
-def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
+def cbFileFilter(toRemove, cbFile, out_cbFile, verbose, namesOnly = False):
     """Function that subtracts the appropriate numbers from the CB counts,
     including the T frequencies in UMIs. Note that where related, parts of this
     function's code were adapted from the scumi module
@@ -49,6 +49,9 @@ def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
         is used with '.filtered.tsv' appended.
     verbose : (bool)
         Indicates whether extra messages are logged.
+    namesOnly : (bool), optional
+        Indicates whether only a set of reads names was passed, instead of
+        entire pysam.AlignedSegment() objects.
 
     Returns
     -------
@@ -65,8 +68,12 @@ def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
         # Determine which barcodes are present
         barcodes = set()
         for barcode in ['CB_', 'UB_']:
-            if barcode in firstRead.query_name:
-                barcodes.add(barcode)
+            if namesOnly:
+                if barcode in firstRead:
+                    barcodes.add(barcode)
+            else:
+                if barcode in firstRead.query_name:
+                    barcodes.add(barcode)
         # Construct the barcode parser based on the barcodes present
         barcodeParser = '.*'
         if 'CB_' in barcodes:
@@ -87,7 +94,8 @@ def cbFileFilter(toRemove, cbFile, out_cbFile, verbose):
         
         for read in toRemove:
             # Extract the respective barcodes & count them for each read
-            match = barcodeParser.match(read.query_name)
+            match = barcodeParser.match(
+                read) if namesOnly else barcodeParser.match(read.query_name)
             cb = scu._extract_tag(match, 'CB')
             umi = scu._extract_tag(match, 'UB')
             cbCounter[cb] += [x == 'T' for x in 'T' + umi]
@@ -584,16 +592,18 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
 
 
 def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
-                  cbFile = None, out_cbFile = None, verbose = False):
+                  cbFile = None, out_cbFile = None, exonicOnly = False,
+                  out_transBaselineData = None, out_db = None,
+                  weightedCov = True, verbose = False):
     """Function that RANDOMLY filters an indexed BAM file to remove a given
-    proportion of total alignments (note that only *mapped* alignments will be
-    removed).
+    proportion of total alignments. Note that only *mapped* alignments [and
+    only exonic, if selected] will be removed.
 
     Parameters
     ----------
     remProp : (float)
-        The proportion of *all* alignments to be removed. (However, only
-        mapped alignments will be removed.)
+        The total number or proportion (if less than 1) of *all* alignments to
+        be removed. (However, only mapped/exonic alignments will be removed.)
     bamfile : (str)
         Location of the sorted and indexed bamfile to be filtered.
     setSeed : (int), optional
@@ -608,6 +618,21 @@ def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
     out_cbFile : (str, None), optional
         Location of a new scumi cell barcode count file, if any. If None, the
         cbFile name is used with '.filtered.tsv' appended. The default is None.
+    exonicOnly : (bool), optional
+        Indicates whether only exonic reads may be removed (amounting to the
+        total proportion of reads removed); otherwise, mapped reads will be
+        randomly removed, amounting to the total proportion indicated, remProp.
+    out_transBaselineData : (str), optional
+        Path to the saved baseline data, if done before. Only needed if
+        exonicOnly is True. The default is None.
+    out_db : (str), optional
+        Path to the saved GTF/GFF database. Only needed if exonicOnly is True.
+        The default is None.
+    weightedCov : (bool), optional
+        Determines whether the covered bases are weighted by coverage amount
+        (i.e., coverage is summed). Only included for the purposes of using
+        cached baseline files; otherwise has no impact on the results of this
+        function. The default is True.
     verbose : (bool), optional
         Indicates whether extra messages are logged. The default is False.
 
@@ -636,32 +661,101 @@ def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
     #  https://github.com/pysam-developers/pysam/issues/968
     total = bamIN.mapped + bamIN.unmapped
     # Calculate the # of alignmens to be removed
-    nAligToRemove = int(remProp * total)
-    # Calculate the proportion of mapped alignments to be kept
-    keepMapProb = 1 - nAligToRemove / (total - bamIN.nocoordinate)
-
-    logger.info(f'Writing the filtered BAM file, to exclude approximately '
-                f'{nAligToRemove:,d} mapped alignments out of {total:,d} '
-                'total...')
-    # Write the new bam file, including all unmapped reads and a proportion of
-    #  mapped reads
-    bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bamIN)
+    nAligToRemove = int(remProp * total) if remProp < 1 else int(remProp)
     nAll = 0
     included = 0
-    for alignment in bamIN.fetch(until_eof = True):
-        nAll += 1
-        if alignment.is_unmapped or random() < keepMapProb:
-            bamOUT.write(alignment)
-            included += 1
-        elif cbFile:
-            removed.add(alignment)
-            
-        if not nAll % 10000000 and nAll and verbose:
-            logger.info(f'Processed {nAll:,d} input alignments, of which '
-                        f'{nAll-included:,d} were excluded...')
-            
-    # Close the files
-    bamIN.close()
+    
+    if not exonicOnly:
+        # Calculate the proportion of mapped alignments to be kept
+        keepMapProb = 1 - nAligToRemove / (total - bamIN.nocoordinate)
+        logger.info(f'Writing the filtered BAM file, to exclude approximately '
+                    f'{nAligToRemove:,d} ({1-keepMapProb:.1%}) mapped '
+                    f'alignments out of {total-bamIN.nocoordinate:,d} mapped '
+                    f'and {total:,d} total...')
+        # Initiate the output BAM file
+        bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bamIN)
+        # Write the new bam file, including all unmapped reads and a proportion
+        #  of mapped reads
+        for alignment in bamIN.fetch(until_eof = True):
+            nAll += 1
+            if alignment.is_unmapped or random() < keepMapProb:
+                bamOUT.write(alignment)
+                included += 1
+            elif cbFile:
+                removed.add(alignment.query_name)
+                
+            if not nAll % 10000000 and nAll and verbose:
+                logger.info(f'Processed {nAll:,d} input alignments, of which '
+                            f'{nAll-included:,d} were excluded...')
+        # Close the input file
+        bamIN.close()
+    else:
+        # First, iterate over all exonic reads and save their names in a set
+        BLdata = getBaselineData(out_transBaselineData = out_transBaselineData,
+                                 out_db = out_db, bamfile = bamfile,
+                                 includeIntrons = False,
+                                 weightedCov = weightedCov)
+        covTransByStrdRef = BLdata[0]
+        exonic = set()
+        
+        for strd, covTransByRef in covTransByStrdRef.items():
+            for refName, covTrans in covTransByRef.items():
+                if verbose:
+                    logger.info('Looking for exonic alignments on reference '
+                                f'{refName}{"+" if strd else "-"}...')
+                # Flatten all the expressed transcripts' exons on this strd/ref
+                flatExons = []
+                for Tran in covTrans:
+                    flatExons.extend(Tran.exons)
+                flatExons = flattenIntervals(flatExons)
+                # Look for the exonic alignments
+                for start, end in flatExons:
+                    for alignment in bamIN.fetch(
+                            contig = refName, start = start, stop = end):
+                        # Ensure the alignment is on the correct strd
+                        if alignment.is_reverse != strd:
+                            # Make sure that filtered alignments indeed map to
+                            #  the area identified, not just overlap it with
+                            #  their start-end range (in case of splicing)
+                            mapping = getOverlaps(alignment.get_blocks(),
+                                                  [(start, end)])
+                            if mapping != []:
+                                exonic.add(alignment.query_name)
+        # Close the input file to reopen later
+        bamIN.close()
+        # Calculate the proportion of exonic alignments to be kept
+        keepExProb = 1 - nAligToRemove / len(exonic)
+        logger.info(f'Writing the filtered BAM file, to exclude approximately '
+            f'{nAligToRemove:,d} ({1-keepExProb:.1%}) exonic alignments out of'
+            f' {len(exonic):,d} exonic and {total:,d} total...')
+        # reopen the input BAM file
+        bam = pysam.AlignmentFile(bamfile, 'rb')
+        # Initiate the output BAM file
+        bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bam)
+        # Save the names to check for uniqueness
+        allNames = set()
+        # Write the new bam file, including all non-exonic reads and a
+        #  proportion of exonic reads
+        for alignment in bam.fetch(until_eof = True):
+            nAll += 1
+            allNames.add(alignment.query_name)
+            if alignment.query_name not in exonic or random() < keepExProb:
+                bamOUT.write(alignment)
+                included += 1
+            elif cbFile:
+                removed.add(alignment.query_name)
+                
+            if not nAll % 10000000 and nAll and verbose:
+                logger.info(f'Processed {nAll:,d} input alignments, of which '
+                            f'{nAll-included:,d} were excluded...')
+        # Close the input file
+        bam.close()
+        # Verify alignment name uniqueness
+        assert nAll == len(allNames), (
+            f'{nAll:,d} input alignments were processed, which does not match '
+            f'the number of alignment names seen ({len(allNames):,d}).')
+        
+    # Close the output file
     bamOUT.close()
     logger.info(f'A filtered BAM file with {included:,d}/{nAll:,d} alignments '
                 f'has been created. [Randomly excluded {nAll-included:,d} '
@@ -669,7 +763,7 @@ def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
 
     # Filter the cbFile, if any
     if cbFile:
-        cbFileFilter(removed, cbFile, out_cbFile, verbose)
+        cbFileFilter(removed, cbFile, out_cbFile, verbose, namesOnly = True)
 
 
 def findSNRpieces(covLen, seq, strd, base = 'A', mism = 0, minSNRlen = 5):
