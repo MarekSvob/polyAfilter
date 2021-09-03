@@ -749,8 +749,8 @@ def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
         bam.close()
         # Verify alignment name uniqueness
         assert nAll - included == len(removed), (
-            f'{nAll:,d} input alignments were removed, which does not match '
-            f'the number of alignment names removed ({len(removed):,d}).')
+            f'{nAll-included:,d} alignments were removed, which does not match'
+            f' the number of alignment names removed, ({len(removed):,d}).')
         
     # Close the output file
     bamOUT.close()
