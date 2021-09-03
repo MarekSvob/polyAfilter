@@ -732,13 +732,10 @@ def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
         bam = pysam.AlignmentFile(bamfile, 'rb')
         # Initiate the output BAM file
         bamOUT = pysam.AlignmentFile(out_bamfile, 'wb', template = bam)
-        # Save the names to check for uniqueness
-        allNames = set()
         # Write the new bam file, including all non-exonic reads and a
         #  proportion of exonic reads
         for alignment in bam.fetch(until_eof = True):
             nAll += 1
-            allNames.add(alignment.query_name)
             if alignment.query_name not in exonic or random() < keepExProb:
                 bamOUT.write(alignment)
                 included += 1
@@ -751,9 +748,9 @@ def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
         # Close the input file
         bam.close()
         # Verify alignment name uniqueness
-        assert nAll == len(allNames), (
-            f'{nAll:,d} input alignments were processed, which does not match '
-            f'the number of alignment names seen ({len(allNames):,d}).')
+        assert nAll - included == len(removed), (
+            f'{nAll:,d} input alignments were removed, which does not match '
+            f'the number of alignment names removed ({len(removed):,d}).')
         
     # Close the output file
     bamOUT.close()
