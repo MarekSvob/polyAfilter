@@ -682,7 +682,7 @@ def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
                 bamOUT.write(alignment)
                 included += 1
             elif cbFile:
-                removed.add(alignment.query_name)
+                removed.add(alignment)
                 
             if not nAll % 10000000 and nAll and verbose:
                 logger.info(f'Processed {nAll:,d} input alignments, of which '
@@ -720,7 +720,7 @@ def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
                             mapping = getOverlaps(alignment.get_blocks(),
                                                   [(start, end)])
                             if mapping != []:
-                                exonic.add(alignment.query_name)
+                                exonic.add(alignment)
         # Close the input file to reopen later
         bamIN.close()
         # Calculate the proportion of exonic alignments to be kept
@@ -736,11 +736,11 @@ def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
         #  proportion of exonic reads
         for alignment in bam.fetch(until_eof = True):
             nAll += 1
-            if alignment.query_name not in exonic or random() < keepExProb:
+            if alignment not in exonic or random() < keepExProb:
                 bamOUT.write(alignment)
                 included += 1
             elif cbFile:
-                removed.add(alignment.query_name)
+                removed.add(alignment)
                 
             if not nAll % 10000000 and nAll and verbose:
                 logger.info(f'Processed {nAll:,d} input alignments, of which '
@@ -760,7 +760,7 @@ def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
 
     # Filter the cbFile, if any
     if cbFile:
-        cbFileFilter(removed, cbFile, out_cbFile, verbose, namesOnly = True)
+        cbFileFilter(removed, cbFile, out_cbFile, verbose)
 
 
 def findSNRpieces(covLen, seq, strd, base = 'A', mism = 0, minSNRlen = 5):
