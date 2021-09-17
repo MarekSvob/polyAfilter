@@ -23,7 +23,8 @@ from collections import defaultdict
 
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
     sortSNRsByLenStrdRef
-from SNRanalysis import flattenIntervals, getOverlaps
+from SNRanalysis import flattenIntervals, getOverlaps, \
+    getFlatFeatsByTypeStrdRef
 from SNRdetection import loadPKL
 
 
@@ -750,7 +751,7 @@ def propBAMfilter(remProp, bamfile, setSeed = 1, out_bamfile = None,
         # Verify alignment name uniqueness
         assert nAll - included == len(removed), (
             f'{nAll-included:,d} alignments were removed, which does not match'
-            f' the number of alignment names removed, ({len(removed):,d}).')
+            f' the number of alignment names removed, {len(removed):,d}.')
         
     # Close the output file
     bamOUT.close()
@@ -1552,3 +1553,94 @@ def spBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
                 f'has been created. [Excluded {nAll-included:,d} alignments '
                 f'{covLen:,d} bp upstream of non-terminal SNR{minSNRlen}+.]')
 
+
+def countAlignments(bamfile, out_strandedFeats, out_db = None,
+                    verbose = False):
+    """Function that counts the number of exonic, intronic (overlapping
+    transcripts but not exons), intergenic (mapped but not overlapping
+    transcripts), and unmapped alignments in a BAM file.
+
+    Parameters
+    ----------
+    bamfile : (str)
+        Location of the sorted and indexed bamfile to be filtered.
+    out_strandedFeats : (str)
+        Path to saved output.
+    out_db : (str), optional
+        Path to the saved GTF/GFF database. Only needed if out_strandedFeats
+        file does not exist yet or does not contain the necessary feature
+        types. The default is None.
+    verbose : (bool), optional
+        Indicates whether extra messages are logged. The default is False.
+
+    Returns
+    -------
+    data : (dict)
+        { 'label' : int }
+    """
+    
+    # First, obtain the flattened features
+    flatFeatsByTypeStrdRef = getFlatFeatsByTypeStrdRef(
+        out_strandedFeats = out_strandedFeats, out_db = out_db,
+        featsOfInterest = ('transcript', 'exon'))
+    
+    nAll = 0
+    unmapped = 0
+    exonic = 0
+    intronic = 0
+    intergenic = 0
+    # Scan the bam file, counting the reads by type
+    bam = pysam.AlignmentFile(bamfile, 'rb')
+    for alignment in bam.fetch(until_eof = True):
+        nAll += 1
+        # Check if mapped
+        if alignment.is_unmapped:
+            unmapped += 1
+        else:
+            # Check if exonic
+            if getOverlaps(
+                    alignment.get_blocks(),
+                    flatFeatsByTypeStrdRef['exon'][not alignment.is_reverse][
+                        alignment.reference_name]) != []:
+                exonic += 1
+            else:
+                # Check if intronic
+                if getOverlaps(
+                        alignment.get_blocks(),
+                        flatFeatsByTypeStrdRef['transcript'][
+                            not alignment.is_reverse][alignment.reference_name]
+                        ) != []:
+                    intronic += 1
+                else:
+                    intergenic += 1
+            
+        if not nAll % 10000000 and nAll and verbose:
+            logger.info(f'Processed {nAll:,d} input alignments...')
+    
+    # Verify the numbers of alignments
+    assert bam.unmapped + bam.mapped == nAll, (
+        f'{nAll:,d} alignments were processed, which does not match the number'
+        f' of alignments in the file, {bam.unmapped + bam.mapped:,d}.')
+    assert bam.unmapped  == unmapped, (
+        f'{unmapped:,d} unmapped alignments were found, which does not match '
+        f'the number of unmapped alignments in the file, {bam.unmapped:,d}.')
+    assert bam.mapped  == exonic + intronic + intergenic, (
+        f'{exonic:,d} exonic, {intronic:,d} intronic, and {intergenic:,d} '
+        f'intergenic alignments were found, which does not match the total '
+        f'number of mapped alignments in the file, {bam.mapped:,d}.')
+    # Close the bam file
+    bam.close()
+    
+    data = {}
+    data['Total'] = nAll
+    data['Unmapped'] = unmapped
+    data['Exonic'] = exonic
+    data['Intronic'] = intronic
+    data['Intergenic'] = intergenic
+    
+    logger.info(f'A BAM file with {nAll:,d} alignments has been processed. '
+                f'{exonic:,d} exonic, {intronic:,d} intronic, {intergenic:,d} '
+                f'intergenic, and {unmapped:,d} unmapped alignments were '
+                'found.')
+    
+    return data
