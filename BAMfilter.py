@@ -20,11 +20,11 @@ from scumi import scumi as scu
 from Bio import SeqIO
 from random import seed, random
 from collections import defaultdict
-from gffutils import FeatureDB
 
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
     sortSNRsByLenStrdRef
-from SNRanalysis import flattenIntervals, getOverlaps
+from SNRanalysis import flattenIntervals, getOverlaps, \
+    getFlatFeatsByTypeStrdRef
 from SNRdetection import loadPKL
 
 
@@ -1554,7 +1554,69 @@ def spBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
                 f'{covLen:,d} bp upstream of non-terminal SNR{minSNRlen}+.]')
 
 
-def countAlignments(bamfile, out_db, verbose = False):
+def countByStrdRef(bamfile, strd, ref, flatExons, flatTrans):
+    """Parallel processing function to count exonic/intronic alignments in a
+    single thread.
+
+    Parameters
+    ----------
+    bamfile : (str)
+        The location of the sorted and indexed BAM file.
+    strd : (bool)
+        + (True) or - strand.
+    ref : (str)
+        Name of the reference.
+    flatExons : (list)
+        [ (start, stop) ]
+    flatTrans : (list)
+        [ (start, stop) ]
+
+    Returns
+    -------
+    { 'exonic' : #, 'intronic': #}
+    """
+    
+    logger.info('Looking for exonic alignments on reference '
+                f'{ref}{"+" if strd else "-"}...')
+    exonic = set()
+    intronic = set()
+    
+    bam = pysam.AlignmentFile(bamfile, 'rb')
+    # Scan for exonic alignments and add them
+    for start, end in flatExons:
+        for alignment in bam.fetch(contig = ref, start = start, stop = end):
+            # Ensure the alignment is on the correct strd
+            if alignment.is_reverse != strd:
+                # Make sure that filtered alignments indeed map to
+                #  the area identified, not just overlap it with
+                #  their start-end range (in case of splicing)
+                if getOverlaps(alignment.get_blocks(), [(start, end)]) != []:
+                    exonic.add(alignment)
+    # Scan for intronic alignments and add them if not exonic
+    for start, end in flatTrans:
+        for alignment in bam.fetch(contig = ref, start = start, stop = end):
+            # Ensure the alignment is on the correct strd
+            if alignment.is_reverse != strd:
+                # Make sure that filtered alignments indeed map to
+                #  the area identified, not just overlap it with
+                #  their start-end range (in case of splicing)
+                if alignment not in exonic and getOverlaps(
+                        alignment.get_blocks(), [(start, end)]) != []:
+                    intronic.add(alignment)
+    # Close the bam file
+    bam.close()
+    
+    nExonic = len(exonic)
+    nIntronic = len(intronic)
+    
+    logger.info(f'{nExonic:,d} exonic and {nIntronic:,d} intronic alignments '
+                f'were detected on {ref}{"+" if strd else "-"}...')
+    
+    return { 'exonic': nExonic, 'intronic': nIntronic }
+
+
+def countAlignments(bamfile, out_strandedFeats, out_db = None, threads = 1,
+                    verbose = False):
     """Function that counts the number of exonic, intronic (overlapping
     transcripts but not exons), intergenic (mapped but not overlapping
     transcripts), and unmapped alignments in a BAM file.
@@ -1563,8 +1625,14 @@ def countAlignments(bamfile, out_db, verbose = False):
     ----------
     bamfile : (str)
         Location of the sorted and indexed bamfile to be filtered.
-    out_db : (str)
-        Path to the saved GTF/GFF database.
+    out_strandedFeats : (str)
+        Path to saved output.
+    out_db : (str), optional
+        Path to the saved GTF/GFF database. Only needed if out_strandedFeats
+        file does not exist yet or does not contain the necessary feature
+        types. The default is None.
+    threads : (int), optional
+        The number of threads to be used throughout this function.
     verbose : (bool), optional
         Indicates whether extra messages are logged. The default is False.
 
@@ -1574,69 +1642,62 @@ def countAlignments(bamfile, out_db, verbose = False):
         { 'label' : int }
     """
     
-    nAll = 0
-    unmapped = 0
-    exonic = 0
-    intronic = 0
-    intergenic = 0
-    # Open the db connection
-    db_conn = FeatureDB(out_db)
-    # Scan the bam file, counting the reads by type
-    bam = pysam.AlignmentFile(bamfile, 'rb')
-    for alignment in bam.fetch(until_eof = True):
-        nAll += 1
-        # Check if mapped
-        if alignment.is_unmapped:
-            unmapped += 1
-        else:
-            # Collect all the featuretypes
-            feats = set()
-            # Check each block of the alignment
-            for start, end in alignment.get_blocks():
-                # For each feature from the db spanned by the SNR
-                for ft in db_conn.region(
-                        region = (alignment.reference_name, start, end+1),
-                        strand = not alignment.is_reverse):
-                # Note that the region() query is a 1-based (a,b)
-                #  open interval, as documented here:
-                #  https://github.com/daler/gffutils/issues/129
-                    # Save the feature type & add to the set
-                    feats.update({ft.featuretype})
-            
-            if 'exon' in feats:
-                exonic += 1
-            elif 'transcript' in feats:
-                intronic += 1
-            else:
-                intergenic += 1
-            
-        if not nAll % 10000000 and nAll and verbose:
-            logger.info(f'Processed {nAll:,d} input alignments...')
+    # Sort & index the BAM into a local file
+    bamSort = f'{bamfile}.sorted.bam'
     
-    # Verify the numbers of alignments
-    assert bam.unmapped + bam.mapped == nAll, (
-        f'{nAll:,d} alignments were processed, which does not match the number'
-        f' of alignments in the file, {bam.unmapped + bam.mapped:,d}.')
-    assert bam.unmapped  == unmapped, (
-        f'{unmapped:,d} unmapped alignments were found, which does not match '
-        f'the number of unmapped alignments in the file, {bam.unmapped:,d}.')
-    assert bam.mapped  == exonic + intronic + intergenic, (
-        f'{exonic:,d} exonic, {intronic:,d} intronic, and {intergenic:,d} '
-        f'intergenic alignments were found, which does not match the total '
-        f'number of mapped alignments in the file, {bam.mapped:,d}.')
+    logger.info(f'Sorting {bamfile} by coordinates...')
+    pysam.sort(bamfile, '-o', bamSort, '-@', str(threads))
+    
+    logger.info(f'Indexing {bamSort}...')
+    pysam.index(bamSort, '-@', str(threads))
+    
+    # Obtain the overall statistics
+    bam = pysam.AlignmentFile(bamSort, 'rb')
+    data = {'Mapped': bam.mapped,
+            'Unmapped': bam.unmapped,
+            'Exonic': 0,
+            'Intronic': 0}
     # Close the bam file
     bam.close()
     
-    data = {}
-    data['Total'] = nAll
-    data['Unmapped'] = unmapped
-    data['Exonic'] = exonic
-    data['Intronic'] = intronic
-    data['Intergenic'] = intergenic
+    # Obtain the flattened features
+    flatFeatsByTypeStrdRef = getFlatFeatsByTypeStrdRef(
+        out_strandedFeats = out_strandedFeats, out_db = out_db,
+        featsOfInterest = ('transcript', 'exon'))
     
-    logger.info(f'A BAM file with {nAll:,d} alignments has been processed. '
-                f'{exonic:,d} exonic, {intronic:,d} intronic, {intergenic:,d} '
-                f'intergenic, and {unmapped:,d} unmapped alignments were '
-                'found.')
+    # Create a pool of processes
+    pool = multiprocessing.Pool(processes = threads)
+    # Produce the results in parallel
+    results = [
+        pool.apply_async(func = countByStrdRef,
+                         args = (
+                             bamSort, strd, ref, flatExons,
+                             flatFeatsByTypeStrdRef['transript'][strd][ref]))
+        for strd, flatExonsByRef in flatFeatsByTypeStrdRef['exon'].items()
+        for ref, flatExons in flatExonsByRef.items()]
+    # Close the pool
+    pool.close()
+    # Join the processes
+    pool.join()
+    
+    # Get the results
+    for result in results:
+        nums = result.get()
+        data['Exonic'] += nums['exonic']
+        data['Intronic'] += nums['intronic']
+    
+    logger.info(f'BAM file {bamfile} with {data["Mapped"]+data["Unmapped"]:,d}'
+                f' alignments has been processed. {data["Exonic"]:,d} exonic, '
+                f'{data["Intronic"]:,d} intronic, '
+                f'{data["Mapped"] - data["Exonic"] - data["Intronic"]:,d} '
+                f'intergenic, and {data["Unmapped"]:,d} unmapped alignments '
+                'were found.')
+    
+    pd.DataFrame(data).to_csv(f'{bamfile}.counts.csv', index = False)
+    
+    logger.info(f'Removing {bamSort} and the associated index...')
+    os.remove(bamSort)
+    os.remove(f'{bamSort}.bai')
     
     return data
+
