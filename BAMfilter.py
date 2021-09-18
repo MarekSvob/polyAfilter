@@ -20,11 +20,11 @@ from scumi import scumi as scu
 from Bio import SeqIO
 from random import seed, random
 from collections import defaultdict
+from gffutils import FeatureDB
 
 from RNAseqAnalysis import getBaselineData, getTransEndSensSpec, \
     sortSNRsByLenStrdRef
-from SNRanalysis import flattenIntervals, getOverlaps, \
-    getFlatFeatsByTypeStrdRef
+from SNRanalysis import flattenIntervals, getOverlaps
 from SNRdetection import loadPKL
 
 
@@ -1554,8 +1554,7 @@ def spBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
                 f'{covLen:,d} bp upstream of non-terminal SNR{minSNRlen}+.]')
 
 
-def countAlignments(bamfile, out_strandedFeats, out_db = None,
-                    verbose = False):
+def countAlignments(bamfile, out_db, verbose = False):
     """Function that counts the number of exonic, intronic (overlapping
     transcripts but not exons), intergenic (mapped but not overlapping
     transcripts), and unmapped alignments in a BAM file.
@@ -1564,12 +1563,8 @@ def countAlignments(bamfile, out_strandedFeats, out_db = None,
     ----------
     bamfile : (str)
         Location of the sorted and indexed bamfile to be filtered.
-    out_strandedFeats : (str)
-        Path to saved output.
-    out_db : (str), optional
-        Path to the saved GTF/GFF database. Only needed if out_strandedFeats
-        file does not exist yet or does not contain the necessary feature
-        types. The default is None.
+    out_db : (str)
+        Path to the saved GTF/GFF database.
     verbose : (bool), optional
         Indicates whether extra messages are logged. The default is False.
 
@@ -1579,16 +1574,13 @@ def countAlignments(bamfile, out_strandedFeats, out_db = None,
         { 'label' : int }
     """
     
-    # First, obtain the flattened features
-    flatFeatsByTypeStrdRef = getFlatFeatsByTypeStrdRef(
-        out_strandedFeats = out_strandedFeats, out_db = out_db,
-        featsOfInterest = ('transcript', 'exon'))
-    
     nAll = 0
     unmapped = 0
     exonic = 0
     intronic = 0
     intergenic = 0
+    # Open the db connection
+    db_conn = FeatureDB(out_db, keep_order = True)
     # Scan the bam file, counting the reads by type
     bam = pysam.AlignmentFile(bamfile, 'rb')
     for alignment in bam.fetch(until_eof = True):
@@ -1597,22 +1589,26 @@ def countAlignments(bamfile, out_strandedFeats, out_db = None,
         if alignment.is_unmapped:
             unmapped += 1
         else:
-            # Check if exonic
-            if getOverlaps(
-                    alignment.get_blocks(),
-                    flatFeatsByTypeStrdRef['exon'][not alignment.is_reverse][
-                        alignment.reference_name]) != []:
+            # Collect all the featuretypes
+            feats = set()
+            # Check each block of the alignment
+            for start, end in alignment.get_blocks():
+                # For each feature from the db spanned by the SNR
+                for ft in db_conn.region(
+                        region = (alignment.reference_name, start, end+1),
+                        strand = not alignment.is_reverse):
+                # Note that the region() query is a 1-based (a,b)
+                #  open interval, as documented here:
+                #  https://github.com/daler/gffutils/issues/129
+                    # Save the feature type & add to the set
+                    feats.update({ft.featuretype})
+            
+            if 'exon' in feats:
                 exonic += 1
+            elif 'transcript' in feats:
+                intronic += 1
             else:
-                # Check if intronic
-                if getOverlaps(
-                        alignment.get_blocks(),
-                        flatFeatsByTypeStrdRef['transcript'][
-                            not alignment.is_reverse][alignment.reference_name]
-                        ) != []:
-                    intronic += 1
-                else:
-                    intergenic += 1
+                intergenic += 1
             
         if not nAll % 10000000 and nAll and verbose:
             logger.info(f'Processed {nAll:,d} input alignments...')
