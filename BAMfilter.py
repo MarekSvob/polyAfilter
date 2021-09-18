@@ -1672,7 +1672,7 @@ def countAlignments(bamfile, out_strandedFeats, out_db = None, threads = 1,
         pool.apply_async(func = countByStrdRef,
                          args = (
                              bamSort, strd, ref, flatExons,
-                             flatFeatsByTypeStrdRef['transript'][strd][ref]))
+                             flatFeatsByTypeStrdRef['transcript'][strd][ref]))
         for strd, flatExonsByRef in flatFeatsByTypeStrdRef['exon'].items()
         for ref, flatExons in flatExonsByRef.items()]
     # Close the pool
