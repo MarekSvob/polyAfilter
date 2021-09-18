@@ -1693,7 +1693,8 @@ def countAlignments(bamfile, out_strandedFeats, out_db = None, threads = 1,
                 f'intergenic, and {data["Unmapped"]:,d} unmapped alignments '
                 'were found.')
     
-    pd.DataFrame(data).to_csv(f'{bamfile}.counts.csv', index = False)
+    pd.DataFrame(data, index = [0]).to_csv(f'{bamfile}.counts.csv',
+                                           index = False)
     
     logger.info(f'Removing {bamSort} and the associated index...')
     os.remove(bamSort)
