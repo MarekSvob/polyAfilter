@@ -1580,7 +1580,7 @@ def countAlignments(bamfile, out_db, verbose = False):
     intronic = 0
     intergenic = 0
     # Open the db connection
-    db_conn = FeatureDB(out_db, keep_order = True)
+    db_conn = FeatureDB(out_db)
     # Scan the bam file, counting the reads by type
     bam = pysam.AlignmentFile(bamfile, 'rb')
     for alignment in bam.fetch(until_eof = True):
