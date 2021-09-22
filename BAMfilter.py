@@ -1074,8 +1074,9 @@ def scanBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
     
     if nThreads is None:
         logger.info(f'Identifying alignments {covLen:,d} bp upstream of non-'
-                    f'terminal SNR{minSNRlen}+ with {mism} mismatches to be '
-                    'removed in 1 serial process...')
+                    f'terminal SNR{minSNRlen}+ with up to {mism} mismatches ('
+                    f'{"including" if includeIntrons else "excluding"} introns'
+                    ') to be removed in 1 serial process...')
         # Connect to the fasta reference if needed
         if minSNRlen is not None:
             recDict = SeqIO.index(fastafile, 'fasta')
@@ -1127,8 +1128,10 @@ def scanBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
     
     else:                
         logger.info(f'Identifying alignments {covLen:,d} bp upstream of non-'
-                    f'terminal SNR{minSNRlen}+ to be removed across {nThreads} '
-                    'parallel processes and writing temporary files...')
+                    f'terminal SNR{minSNRlen}+ with up to {mism} mismatches ('
+                    f'{"including" if includeIntrons else "excluding"} introns'
+                    f') to be removed across {nThreads} parallel processes and'
+                    ' writing temporary files...')
         # Set the number of threads for NumExpr (used by pandas & numpy)
         os.environ['NUMEXPR_MAX_THREADS'] = str(nThreads)
         # Create a pool of processes with shared variables
