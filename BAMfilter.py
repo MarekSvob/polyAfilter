@@ -13,10 +13,7 @@ import multiprocessing
 import multiprocessing.pool
 
 import numpy as np
-import pandas as pd
-import regex as re
 from functools import partial
-from scumi import scumi as scu
 from Bio import SeqIO
 from random import seed, random
 from collections import defaultdict
@@ -58,6 +55,10 @@ def cbFileFilter(toRemove, cbFile, out_cbFile, verbose, namesOnly = False):
     -------
     None.
     """
+    
+    import pandas as pd
+    import regex as re
+    from scumi import scumi as scu
     
     if verbose:
         logger.info('Counting UMIs per cell to be removed from the CB file...')
@@ -1653,6 +1654,8 @@ def countAlignments(bamfile, out_strandedFeats, out_db = None, threads = 1,
     data : (dict)
         { 'label' : int }
     """
+    
+    import pandas as pd
     
     # Sort & index the BAM into a local file
     bamSort = f'{bamfile}.sorted.bam'

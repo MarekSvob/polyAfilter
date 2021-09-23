@@ -12,9 +12,7 @@ import logging
 import numpy as np
 from Bio import SeqIO
 from collections import defaultdict
-from IPython.display import clear_output
 from functools import partial
-from sklearn import metrics
 
 from SNRanalysis import getFlatFeatsByTypeStrdRef, getSNRsByGeneLen, \
     flattenIntervals, getOverlaps, removeOverlaps
@@ -707,6 +705,9 @@ def getNonCanCovGenes(out_NonCanCovGenes, lenToSNRs, out_db, bamfile,
         Genes found to have a significant proportion of coverage outside of
         the canonically expected area.
     """
+    
+    from IPython.display import clear_output
+    
     # Note that all except gffutils feats is 0-based    
     # If the file already exists, simply load
     if os.path.isfile(out_NonCanCovGenes):
@@ -1252,6 +1253,8 @@ def keyVal(key, d, meth):
     val : (float)
         The value assigned to this dict key based on the method used.
     """
+    
+    from sklearn import metrics
     
     TP, FN, TN, FP = d[key][:4]
     
@@ -1864,6 +1867,8 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
                   SNR exon area, SNR exon number,
                   SNR start area, SNR start number) }
     """
+    
+    from IPython.display import clear_output
     
     # If the file already exists, simply load
     if os.path.isfile(out_geneStats):

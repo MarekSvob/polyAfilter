@@ -10,7 +10,6 @@ import os
 import collections
 import gffutils
 import logging
-import pandas as pd
 import numpy as np
 from Bio import SeqIO
 
@@ -150,6 +149,8 @@ def SNRcountTable(base, lengthToSNRcounts, out_bases, fasta = None):
         The table with calculated values.
     """
     
+    import pandas as pd
+    
     # Get the base composition of the genome
     bases = getBaseComp(out_bases, fasta = fasta)
     
@@ -197,6 +198,8 @@ def SNRfeatureSets(lenToFeats):
         A dataframe of features vs. featureSets, where the presence of the
         former in the latter is expressed as a bool.
     """
+    
+    import pandas as pd
     
     # Get the list of (frozen)sets of features represented among the SNRs
     featureSets = list({s for c in lenToFeats.values() for s in c.keys()})
@@ -288,6 +291,8 @@ def SNRlabelProps(lenToFeats, exclusivePairs = None, other = 'Exon',
     df_p : (DataFrame)
         Table of proportions of labeled SNRs for each length.
     """
+    
+    import pandas as pd
     
     # Set the exclusive pairs
     if exclusivePairs is None:
@@ -658,6 +663,8 @@ def normalizeLabels(df, out_strandedFeats, fasta, out_db = None,
     df_norm : (dataframe)
         Normalized dataframe
     """
+    
+    import pandas as pd
     
     # Set the exclusive pairs
     if exclusivePairs is None:
