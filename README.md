@@ -7,7 +7,7 @@ More details available in the manuscript: [link]
 
 ## Dependencies
 
-At minimum, the following is required to run **polyAfilter** [tested version of each dependency is indicated in brackets]
+At minimum, the following is required to run **polyAfilter** [tested version of each dependency is indicated]
 * python [3.7.6]
 * [samtools](http://www.htslib.org/) [1.10]
 * [pysam](https://pysam.readthedocs.io/en/latest/) [0.16.0.1]
