@@ -850,8 +850,8 @@ def getNonCanCovGenes(out_NonCanCovGenes, lenToSNRs, out_db, bamfile,
     return nonCanCovGenes
 
 
-def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons,
-                    weightedCov = True):
+def getBaselineData(out_transBaselineData, out_db, bamfile,
+                    includeIntrons = False, weightedCov = True):
     """Function to obtain the baseline reference data (covered transcripts and
     total TP/TN) as an input for faster calculations of sensitivity &
     specificity at each given end length. Note that here, only expressed (i.e.,
@@ -865,9 +865,9 @@ def getBaselineData(out_transBaselineData, out_db, bamfile, includeIntrons,
         Path to the saved GTF/GFF database.
     bamfile : (str)
         Path to the (filtered) bam file.
-    includeIntrons : (bool)
+    includeIntrons : (bool), optional
         Whether (positive or negative) coverage of introns should also be
-        considered.
+        considered. The default is False.
     weightedCov : (bool), optional
         Determines whether the covered bases are weighted by coverage amount
         (i.e., coverage is summed). Alternatively, the sensitivity/specificity
@@ -1370,7 +1370,8 @@ def getTransEndROC(out_TransEndROC, out_transBaselineData, out_db, bamfile,
     
     # Get the baseline data
     BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
-                             includeIntrons, weightedCov = weightedCov)
+                             includeIntrons = includeIntrons,
+                             weightedCov = weightedCov)
     
     # Start with min, mid, and max and then apply the repetitive algorithm
     #  until 'covergence'
@@ -1873,7 +1874,8 @@ def getStatsByGene(covLen, minSNRlen, lenToSNRs, out_geneStats, out_db,
     SNRsByGeneLen = getSNRsByGeneLen(lenToSNRs, concordant = True)
     # Get the list of covered transcripts by strd & ref
     BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
-                             includeIntrons, weightedCov = weightedCov)
+                             includeIntrons = includeIntrons,
+                             weightedCov = weightedCov)
     covTransByStrdRef = BLdata[0]
     # Sort the covered transcripts by geneID
     covTransByGene = defaultdict(list)

@@ -327,7 +327,8 @@ def parallel_wrapper(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
     # Get transcript starts if N/A for this specific length
     if covLen not in tROC:
         BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
-                                 includeIntrons, weightedCov = weightedCov)
+                                 includeIntrons = includeIntrons,
+                                 weightedCov = weightedCov)
         tROC[covLen] = getTransEndSensSpec(
             covLen, bamfile, BLdata, includeIntrons, getSensSpec = False,
             weightedCov = weightedCov)    
@@ -444,7 +445,8 @@ def BAMfilter(covLen, minSNRlen, bamfile, out_SNRsByLenStrdRef,
         # Get transcript starts if N/A for this specific length
         if covLen not in tROC:
             BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
-                                     includeIntrons, weightedCov = weightedCov)
+                                     includeIntrons = includeIntrons,
+                                     weightedCov = weightedCov)
             tROC[covLen] = getTransEndSensSpec(
                 covLen, bamfile, BLdata, includeIntrons, getSensSpec = False,
                 weightedCov = weightedCov)    
@@ -990,17 +992,17 @@ def scanForAlignmentsToRemove(covLen, refName, strd, minSNRlen, bamfile,
 
 
 def scanBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
-                  out_db, base = 'A', mism = 0, out_bamfile = None, tROC = {},
-                  includeIntrons = False, cbFile = None, out_cbFile = None,
-                  weightedCov = True, verbose = False, nThreads = None):
-    """Slower version of BAMfilter() that, in order to save RAM, does not
-    require loading pre-scanned SNRs; it obtains the intervals upstream of SNRs
-    directly by scanning the fasta reference instead.
-    Filters an indexed BAM file to remove non-canonical alignments that likely
-    resulted from poly(dT) priming onto genomically encoded polyA single
-    nucleotide repeats (SNRs), as opposed to mRNA polyA tails. Note that
-    parallel processing will produce the following warning for each temp file,
-    which can be safely ignored:
+                  out_db = None, base = 'A', mism = 0, out_bamfile = None,
+                  tROC = {}, includeIntrons = False, cbFile = None,
+                  out_cbFile = None, weightedCov = True, verbose = False,
+                  nThreads = None):
+    """Filters an indexed BAM file to remove sparse alignments that likely
+    resulted from poly(dT)s priming onto genomically encoded adenine single
+    nucleotide repeats (A-SNRs), as opposed to mRNA polyA tails. In order to
+    save RAM, it does not require loading pre-scanned SNRs; it obtains the
+    intervals upstream of SNRs directly by scanning the fasta reference
+    provided instead. Note that parallel processing will produce the following
+    warning for each temp file, which can be safely ignored:
         "[E::idx_find_and_load] Could not retrieve index file for <file>"
     
     Parameters
@@ -1017,8 +1019,9 @@ def scanBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
         Location of the reference genome fasta file.
     out_transBaselineData : (str)
         Path to the saved baseline data, if done before.
-    out_db : (str)
-        Path to the saved GTF/GFF database.
+    out_db : (str), optional
+        Path to the saved GTF/GFF database. If out_transBaselineData already
+        exists, this argument is not necessary. The default is None.
     base : (str), optional
         DNA base constituting SNRs to be searched for: 'A', 'T', 'C', 'G', 'N'.
         The default is 'A'.
@@ -1049,6 +1052,10 @@ def scanBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
     nThreads : (int), optional
         Set the maximum number of threads to use besides the main thread.
         If None, serial processing is used. The default is None.
+
+    Returns
+    -------
+    None.
     """
     
     # Initiate the correct output file name
@@ -1065,7 +1072,8 @@ def scanBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
     # Get transcript starts if N/A for this specific length
     if covLen not in tROC:
         BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
-                                 includeIntrons, weightedCov = weightedCov)
+                                 includeIntrons = includeIntrons,
+                                 weightedCov = weightedCov)
         tROC[covLen] = getTransEndSensSpec(
             covLen, bamfile, BLdata, includeIntrons, getSensSpec = False,
             weightedCov = weightedCov)    
@@ -1410,7 +1418,8 @@ def spBAMfilter(covLen, minSNRlen, bamfile, fastafile, out_transBaselineData,
     # Get transcript starts if N/A for this specific length
     if covLen not in tROC:
         BLdata = getBaselineData(out_transBaselineData, out_db, bamfile,
-                                 includeIntrons, weightedCov = weightedCov)
+                                 includeIntrons = includeIntrons,
+                                 weightedCov = weightedCov)
         tROC[covLen] = getTransEndSensSpec(
             covLen, bamfile, BLdata, includeIntrons, getSensSpec = False,
             weightedCov = weightedCov)    
