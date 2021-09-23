@@ -21,14 +21,14 @@ At minimum, the following is required to run **polyAfilter** [tested version of 
 Clone this repository into your local directory using the following command:
 
 ```bash
-$ git clone https://github.com/MarekSvob/polyAfilter.git
+git clone https://github.com/MarekSvob/polyAfilter.git
 ```
 
 This will create a folder titled `polyAfilter` with the contents of this repository.
 After this has been done once, you can run the following command from within this folder in order to download the latest updates:
 
 ```bash
-$ git pull
+git pull
 ```
 
 ## Running polyAfilter
@@ -36,7 +36,7 @@ $ git pull
 While **polyAfilter** contains a wider set of tools useful for A-SNR analysis, the follwing commands (usually run in this order) are core to its functionality:
 
 ```
-$ python polyAfilter.py createDB --help
+python polyAfilter.py createDB --help
 ```
 ```
 usage: polyAfilter.py createDB [-h] [-v] GTF/GFF_FILE OUT_GTF/GFF_FILE
@@ -54,7 +54,7 @@ optional arguments:
 ```
 
 ```
-$ python polyAfilter.py createTRANS --help
+python polyAfilter.py createTRANS --help
 ```
 ```
 usage: polyAfilter.py createTRANS [-h] [-i] TRANS_FILE DB_FILE BAM_FILE
@@ -72,7 +72,7 @@ optional arguments:
 ```
 
 ```
-$ python polyAfilter.py BAMfilter --help
+python polyAfilter.py BAMfilter --help
 ```
 ```
 usage:  polyAfilter.py BAMfilter [-h] [-d DB_FILE] [-b N] [-m MISM] [-o OUT_BAM_FILE] [-i]
