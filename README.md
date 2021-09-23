@@ -1,5 +1,5 @@
 # Introduction
-**polyAfilter** is a command line tool to process BAM files to remove sequencing read alignments that have likely resulted from internal priming in poly(dT) priming-based bulk and single cell RNA sequencing library preparation methods (QuantSeq, 10X, inDrop, Seq-Well, Drop-Seq, CEL-Seq2, etc.).
+**polyAfilter** is a python-based command line tool to process BAM files to remove sequencing read alignments that have likely resulted from internal priming in poly(dT) priming-based bulk and single cell RNA sequencing library preparation methods (QuantSeq, 10X, inDrop, Seq-Well, Drop-Seq, CEL-Seq2, etc.).
 
 More details available in the manuscript: [link]
 
