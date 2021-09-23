@@ -16,12 +16,6 @@ At minimum, the following is required to run **polyAfilter** [tested version of 
 * [numpy](https://numpy.org/doc/stable/) [1.17.0]
 * [dill](https://dill.readthedocs.io/en/latest/) [0.3.1.1]
 
-* pandas
-* iPython
-* sklearn
-* scumi
-* regex
-
 ## Installation
 
 Clone this repository into your local directory using the following command:
