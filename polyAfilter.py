@@ -10,6 +10,38 @@ from RNAseqAnalysis import getBaselineData
 from BAMfilter import scanBAMfilter
 
 
+def createDB_(args):
+    create_db(args.data,
+              args.dbfn,
+              merge_strategy = args.merge_strategy,
+              verbose = args.verbose)
+    
+def createTRANS_(args):
+    getBaselineData(args.out_transBaselineData,
+                    args.out_db,
+                    args.bamfile,
+                    includeIntrons = args.includeIntrons,
+                    weightedCov = args.weightedCov)
+
+def BAMfilter_(args):
+    scanBAMfilter(args.covLen,
+                  args.minSNRlen,
+                  args.bamfile,
+                  args.fastafile,
+                  args.out_transBaselineData,
+                  out_db = args.out_db,
+                  base = args.base,
+                  mism = args.mism,
+                  out_bamfile = args.out_bamfile,
+                  tROC = args.tROC,
+                  includeIntrons = args.includeIntrons,
+                  cbFile = args.cbFile,
+                  out_cbFile = args.out_cbFile,
+                  weightedCov = args.weightedCov,
+                  verbose = args.verbose,
+                  nThreads = args.nThreads)
+
+
 if __name__ == '__main__':
     
     # Create the top-level parser and enable addition of subparsers
@@ -34,8 +66,8 @@ if __name__ == '__main__':
         help = 'Location of the reference GTF/GFF file')
     parser_createDB.add_argument(
         'dbfn',
-        metavar = 'OUT_GTF/GFF_FILE',
-        help = 'Location of the resulting annotation database')
+        metavar = 'DB_FILE',
+        help = 'Location of the output annotation database')
     parser_createDB.add_argument(
         '-m', '--merge_strategy',
         default = 'create_unique',
@@ -44,7 +76,7 @@ if __name__ == '__main__':
         '-v', '--verbose',
         action = 'store_true',
         help = 'Extra messages are logged.')
-    parser_createDB.set_defaults(func = create_db)
+    parser_createDB.set_defaults(func = createDB_)
     
     
     # Parser for getBaselineData
@@ -56,10 +88,6 @@ if __name__ == '__main__':
         the associated BAM file.
         ''')
     parser_createTRANS.add_argument(
-        'out_transBaselineData',
-        metavar = 'TRANS_FILE',
-        help = 'Location of a cache file that stores expressed transcripts')
-    parser_createTRANS.add_argument(
         'out_db',
         metavar = 'DB_FILE',
         help = 'Location of the reference annotation database')
@@ -67,6 +95,10 @@ if __name__ == '__main__':
         'bamfile',
         metavar = 'BAM_FILE',
         help = 'Location of the sorted and indexed BAM file')
+    parser_createTRANS.add_argument(
+        'out_transBaselineData',
+        metavar = 'TRANS_FILE',
+        help = 'Location of the output cache file')
     parser_createTRANS.add_argument(
         '-i', '--introns',
         action = 'store_true',
@@ -76,7 +108,7 @@ if __name__ == '__main__':
         '-w', '--weightedCov',
         action = 'store_false',
         help = argparse.SUPPRESS)
-    parser_createTRANS.set_defaults(func = getBaselineData)
+    parser_createTRANS.set_defaults(func = createTRANS_)
     
     
     # Parser for the BAMfilter
@@ -179,7 +211,7 @@ if __name__ == '__main__':
             
         "[E::idx_find_and_load] Could not retrieve index file for <file>"
         ''')
-    parser_BAMfilter.set_defaults(func = scanBAMfilter)    
+    parser_BAMfilter.set_defaults(func = BAMfilter_)    
     
     
     # Parse the arguments and populate the namespace; execute the code
