@@ -57,14 +57,14 @@ optional arguments:
 python polyAfilter.py createTRANS --help
 ```
 ```
-usage: polyAfilter.py createTRANS [-h] [-i] TRANS_FILE DB_FILE BAM_FILE
+usage: polyAfilter.py createTRANS [-h] [-i] DB_FILE BAM_FILE TRANS_FILE
 
 Creates a cache file with all transcripts that are expressed as per the associated BAM file.
 
 positional arguments:
-  TRANS_FILE     Location of a cache file that stores expressed transcripts
   DB_FILE        Location of the reference annotation database
   BAM_FILE       Location of the sorted and indexed BAM file
+  TRANS_FILE     Location of the output cache file
 
 optional arguments:
   -h, --help     show this help message and exit
