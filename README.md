@@ -1,9 +1,9 @@
 # polyAfilter: Removal of internally primed alignments
 
 ## Introduction
-**polyAfilter** is a python-based command line tool to process BAM files to remove sequencing read alignments that have likely resulted from internal priming in poly(dT) priming-based bulk and single cell RNA sequencing library preparation methods (QuantSeq, 10X, inDrop, Seq-Well, Drop-Seq, CEL-Seq2, etc.).
+**polyAfilter** is a python-based command line tool to process BAM files to remove sequencing read alignments that have likely resulted from internal priming in poly(dT) priming-based bulk and single cell RNA sequencing library preparation methods (QuantSeq, 10X, inDrop, Seq-Well, Drop-Seq, CEL-Seq2, etc.). More details available in our bioRxiv pre-print:
 
-More details available in the manuscript: [link]
+Svoboda, M., Frost, H. R. & Bosco, G. **Internal oligo(dT) priming in bulk and single cell RNA sequencing.** _bioRxiv_ 2021.09.24.461289 (2021). [doi:10.1101/2021.09.24.461289](https://doi.org/10.1101/2021.09.24.461289 )
 
 ## Dependencies
 
