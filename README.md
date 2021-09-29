@@ -81,7 +81,7 @@ optional arguments:
 ```
 
 ### BAMfilter
-Filter a `BAM_FILE` to remove alignments that likely resulted from internal poly(dT) priming up to `COVLEN` bp downstream of these alignments, onto genome-encoded poly(A) sequences (A-Single Nucleotide Repeats, A-SNRs) at least `MINSNRLEN` A's long, with up to `-m MISM` mismatches (the default is `0`). [More details in the associated [manuscript](https://doi.org/10.1101/2021.09.24.461289).] If a `TRANS_FILE` for this `BAM_FILE` does not yet exist, an `--out_db DB_FILE` needs to be provided to create one (as discussed above).
+Filter a `BAM_FILE` to remove alignments that likely resulted from internal poly(dT) priming up to `COVLEN` bp downstream of these alignments, onto genome-encoded poly(A) sequences (A-Single Nucleotide Repeats, A-SNRs) at least `MINSNRLEN` A's long, with up to `-m MISM` mismatches (the default is `0`). [More details in the associated [manuscript](https://doi.org/10.1101/2021.09.24.461289).] If a `TRANS_FILE` for this `BAM_FILE` does not yet exist, an `--out_db DB_FILE` needs to be provided to create one (as discussed [above](https://github.com/MarekSvob/polyAfilter#createtrans)).
 
 ```
 python polyAfilter.py BAMfilter --help
