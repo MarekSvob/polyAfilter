@@ -37,7 +37,9 @@ While **polyAfilter** contains a wider set of tools useful for A-SNR analysis, t
 
 ### createDB
 
-First, it is necessary to create a gff/gtf reference (`GTF/GFF_FILE`)-based database (`DB_FILE`), which provides fast access to annotation features. The `createDB` function is a wrapper around [gffutils.create_db](https://pythonhosted.org/gffutils/autodocs/gffutils.create_db.html), run with a specific set of parameters to ensure compatibility of the output with polyAfilter's other functions. Only one `DB_FILE` needs to be created for each `GTF/GFF_FILE`; this process may take several hours. _Make sure to use the same gtf/gff file that was used to create the BAM file alignment you would like to filter._
+First, it is necessary to create a gff/gtf reference (`GTF/GFF_FILE`)-based database (`DB_FILE`), which provides fast access to annotation features. The `createDB` function is a wrapper around [gffutils.create_db](https://pythonhosted.org/gffutils/autodocs/gffutils.create_db.html), run with a specific set of parameters to ensure compatibility of the output with polyAfilter's other functions. Only one `DB_FILE` needs to be created for each `GTF/GFF_FILE`; this process may take several hours.
+
+_Make sure to use the same `GTF/GFF_FILE` that was originally used to create the `BAM_FILE` alignment you would like to filter._
 ```
 python polyAfilter.py createDB --help
 ```
@@ -62,6 +64,8 @@ Next, a cache file (`TRANS_FILE`) is created, which contains information about a
 - Run `createTRANS` command before running `BAMfilter` to create the associated `TRANS_FILE`. In this scenario, you can later omit the optional `--out_db DB_FILE` argument when running the `BAMfilter`. This process (`createTRANS`) will take a few hours to run but creation of the `TRANS_FILE` will be then skipped when later running the `BAMfilter`. This approach is especially useful if you are planning to run the `BAMfilter` on the the same `BAM_FILE` multiple times (perhaps to try several different values of the `COVLEN`, `MINSNRLEN`, and `MISM` parameters).
 - Run `BAMfilter` directly. If an associated `TRANS_FILE` has not yet been created, the `--out_db DB_FILE` argument has to be supplied and the `TRANS_FILE` will be created first. This will extend the run time of `BAMfilter` the first time it is run but the subsequent runs, once a `TRANS_FILE` exists, will skip this step (even if the `--out_db DB_FILE` argument is supplied).
 
+_Make sure to use the `DB_FILE` created from the same `GTF/GFF_FILE` that was originally used to create the `BAM_FILE` alignment you would like to filter._
+
 ```
 python polyAfilter.py createTRANS --help
 ```
@@ -82,6 +86,8 @@ optional arguments:
 
 ### BAMfilter
 Filter a `BAM_FILE` to remove alignments that likely resulted from internal poly(dT) priming up to `COVLEN` bp downstream of these alignments, onto genome-encoded poly(A) sequences (A-Single Nucleotide Repeats, A-SNRs) at least `MINSNRLEN` A's long, with up to `-m MISM` mismatches (the default is `0`). [More details in the associated [manuscript](https://doi.org/10.1101/2021.09.24.461289).] If a `TRANS_FILE` for this `BAM_FILE` does not yet exist, an `--out_db DB_FILE` needs to be provided to create one (as discussed [above](https://github.com/MarekSvob/polyAfilter#createtrans)).
+
+_Make sure to use the `FASTA_FILE` that was originally used to create the `BAM_FILE` alignment you would like to filter. Similarly, only use the `TRANS_FILE` associated with this specific `BAM_FILE`._
 
 ```
 python polyAfilter.py BAMfilter --help
