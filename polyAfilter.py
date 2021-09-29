@@ -59,7 +59,8 @@ if __name__ == '__main__':
         Wrapper around the create_db function from the gffutils package using
         predefined parameters to ensure that the database is created properly
         for the puposes of the BAMfilter.
-        ''')
+        ''',
+        formatter_class = argparse.ArgumentDefaultsHelpFormatter)
     parser_createDB.add_argument(
         'data',
         metavar = 'GTF/GFF_FILE',
@@ -86,7 +87,8 @@ if __name__ == '__main__':
         description = '''
         Creates a cache file with all transcripts that are expressed as per
         the associated BAM file.
-        ''')
+        ''',
+        formatter_class = argparse.ArgumentDefaultsHelpFormatter)
     parser_createTRANS.add_argument(
         'out_db',
         metavar = 'DB_FILE',
@@ -118,7 +120,8 @@ if __name__ == '__main__':
         description = '''
         Filters a sorted and indexed BAM file to remove sparse alignments that
         likely resulted from internal priming.
-        ''')
+        ''',
+        formatter_class = argparse.ArgumentDefaultsHelpFormatter)
     parser_BAMfilter.add_argument(
         'covLen',
         type = int,
