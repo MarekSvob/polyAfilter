@@ -40,7 +40,7 @@ While **polyAfilter** contains a wider set of tools useful for A-SNR analysis, t
 First, it is necessary to create a gff/gtf reference (`GTF/GFF_FILE`)-based database (`DB_FILE`), which provides fast access to annotation features. The `createDB` function is a wrapper around [gffutils.create_db](https://pythonhosted.org/gffutils/autodocs/gffutils.create_db.html), run with a specific set of parameters to ensure compatibility of the output with polyAfilter's other functions. Only one `DB_FILE` needs to be created for each `GTF/GFF_FILE`; this process may take several hours.
 
 _Make sure to use the same `GTF/GFF_FILE` that was originally used to create the `BAM_FILE` alignment you would like to filter._
-```
+```bash
 python polyAfilter.py createDB --help
 ```
 ```
@@ -66,7 +66,7 @@ Next, a cache file (`TRANS_FILE`) is created, which contains information about a
 
 _Make sure to use the `DB_FILE` created from the same `GTF/GFF_FILE` that was originally used to create the `BAM_FILE` alignment you would like to filter._
 
-```
+```bash
 python polyAfilter.py createTRANS --help
 ```
 ```
@@ -89,7 +89,7 @@ Filter a `BAM_FILE` to remove alignments that likely resulted from internal poly
 
 _Make sure to use the `FASTA_FILE` that was originally used to create the `BAM_FILE` alignment you would like to filter. Similarly, only use the `TRANS_FILE` associated with this specific `BAM_FILE`._
 
-```
+```bash
 python polyAfilter.py BAMfilter --help
 ```
 ```
@@ -134,6 +134,62 @@ optional arguments:
                         produce the following warning for each temp file, which can be safely
                         ignored: "[E::idx_find_and_load] Could not retrieve index file for <file>"
                         (default: None)
+```
+
+### Example
+The following code shows an example of filtering the 10X [BAM file](https://cf.10xgenomics.com/samples/cell-exp/6.1.0/500_PBMC_3p_LT_Chromium_X/500_PBMC_3p_LT_Chromium_X_possorted_genome_bam.bam) (with an associated [BAM index](https://cf.10xgenomics.com/samples/cell-exp/6.1.0/500_PBMC_3p_LT_Chromium_X/500_PBMC_3p_LT_Chromium_X_possorted_genome_bam.bam.bai)) from the "500 Human PBMCs, 3' LT v3.1, Chromium X" dataset. According to the associated [web summary](https://cf.10xgenomics.com/samples/cell-exp/6.1.0/500_PBMC_3p_LT_Chromium_X/500_PBMC_3p_LT_Chromium_X_web_summary.html), this BAM file was created using the [refdata-gex-GRCh38-2020-A](https://cf.10xgenomics.com/supp/cell-exp/refdata-gex-GRCh38-2020-A.tar.gz) 10X Genomics reference.
+
+The code below assumes that the BAM file, the BAM index file, and the reference folder are located inside the `TEST_DIR`. The BAM file is filtered to remove alignments up to `300` (`COVLEN`) bps upstream of all A-SNRs at least `10` (`MINSNRLEN`) A's long, with up to `1` (`-m MISM`) mismatch:
+
+```bash
+# DIRECTORIES [edit these variables with your paths]
+WORKING_DIR=/path/to/polyAfilter
+TEST_DIR=/path/to/test/folder/
+
+# INPUT FILES
+FASTA=$TEST_DIR"refdata-gex-GRCh38-2020-A/fasta/genome.fa"
+GTF=$TEST_DIR"refdata-gex-GRCh38-2020-A/genes/genes.gtf"
+BAM=$TEST_DIR"500_PBMC_3p_LT_Chromium_X_possorted_genome_bam.bam"
+
+# OUTPUT FILES
+DB=$TEST_DIR"gtfdb.db"
+TRANS=$TEST_DIR"trans.pkl"
+
+NTHREADS=4
+
+# SCRIPT
+cd $WORKING_DIR
+
+# Create the GTF database
+python polyAfilter.py createDB -v $GTF $DB
+
+# Create the TRANS file
+python polyAfilter.py createTRANS $DB $BAM $TRANS
+
+# Filter the BAM file
+python polyAfilter.py BAMfilter -m 1 -v -p $NTHREADS 300 10 $BAM $FASTA $TRANS
+```
+As a result of running this script, new `$DB`, `$TRANS` and `$BAM.filtered.bam` files should be created inside the `TEST_DIR`. The filtered BAM file (`$BAM.filtered.bam`) may be used for further downstream processing.
+
+In case of 10X Genomics BAM files that are being processed using the [`cellranger`](https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/what-is-cell-ranger) pipeline (such as the one above), [`bamtofastq`](https://support.10xgenomics.com/docs/bamtofastq) may need to be used to convert the BAM file back to FASTQ files, which can be used as input to `cellranger count`. The following example specifically uses [`bamtofastq_linux`](https://github.com/10XGenomics/bamtofastq/releases/tag/v1.3.0), using the same variables defined in the script above:
+
+```bash
+# LOCATION OF BAMTOFASTQ [edit this variable with your path]
+BAMTOFASTQ=/path/to/bamtofastq_linux
+
+OUT=$TEST_DIR"bamToFastq"
+
+# Convert filtered BAM file to FASTQ files
+$BAMTOFASTQ --nthreads $NTHREADS $BAM".filtered.bam" $OUT
+
+# Re-do the count analysis
+module load cellranger
+
+cellranger count \
+  --localcores $NTHREADS \
+  --fastqs $OUT"/500_PBMC_3p_LT_Chromium_X_0_1_HFFLJDSX2" \
+  --id count \
+  --transcriptome $TEST_DIR"refdata-gex-GRCh38-2020-A"
 ```
 
 ---
