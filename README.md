@@ -33,7 +33,7 @@ git pull
 
 ## Running polyAfilter
 
-While **polyAfilter** contains a wider set of tools useful for A-SNR analysis, the follwing commands (usually run in this order) are core to its functionality and can be run from the command line:
+While **polyAfilter** contains a wider set of tools useful for A-SNR analysis, the following commands (usually run in this order) are core to its functionality and can be run from the command line:
 
 ### createDB
 
