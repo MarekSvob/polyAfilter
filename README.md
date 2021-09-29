@@ -53,7 +53,7 @@ positional arguments:
 
 optional arguments:
   -h, --help     show this help message and exit
-  -v, --verbose  Extra messages are logged.
+  -v, --verbose  Extra messages are logged. (default: False)
 ```
 
 ### createTRANS
@@ -77,7 +77,7 @@ positional arguments:
 
 optional arguments:
   -h, --help     show this help message and exit
-  -i, --introns  Instructs to include intronic coverage
+  -i, --introns  Instructs to include intronic coverage (default: False)
 ```
 
 ### BAMfilter
@@ -105,27 +105,29 @@ optional arguments:
   -h, --help            show this help message and exit
   -d DB_FILE, --out_db DB_FILE
                         Location of the reference annotation database; not necessary if TRANS_FILE
-                        has already been created.
-  -b N, --base N        DNA base constituting SNRs to be searched for
+                        has already been created. (default: None)
+  -b N, --base N        DNA base constituting SNRs to be searched for (default: A)
   -m MISM, --mismatches MISM
-                        The maximum number of mismatches allowed in an SNR
+                        The maximum number of mismatches allowed in an SNR (default: 0)
   -o OUT_BAM_FILE, --out_bamfile OUT_BAM_FILE
                         Location of the resulting filtered bamfile; if not provided, the name of the
-                        input bamfile name is used with ".filtered.bam" appended.
-  -i, --introns         Instructs to include intronic coverage
+                        input bamfile name is used with ".filtered.bam" appended. (default: None)
+  -i, --introns         Instructs to include intronic coverage (default: False)
   -c CB_FILE, --cbFile CB_FILE
                         If the scumi package is being used for alignment counting, provide the
                         location of the file with cell barcode count (output of scumi merge_fastq)
+                        (default: None)
   -e OUT_CB_FILE, --out_cbFile OUT_CB_FILE
                         If the scumi package is being used for alignment counting, provide the
                         location for the modified cell barcode count file to be used as input for
                         scumi count_umi; if not provided in the presence of cbFile, cbFile name is
-                        used with ".filtered.tsv" appended
-  -v, --verbose         Extra messages are logged.
+                        used with ".filtered.tsv" appended (default: None)
+  -v, --verbose         Extra messages are logged. (default: False)
   -p P, --processes P   Set the maximum number of processes to use besides the main process. If not
                         provided, serial processing is used. Note that parallel processing will
                         produce the following warning for each temp file, which can be safely
                         ignored: "[E::idx_find_and_load] Could not retrieve index file for <file>"
+                        (default: None)
 ```
 
 ---
