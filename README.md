@@ -131,11 +131,11 @@ optional arguments:
                         for scumi count_umi; if not provided in the presence of cbFile, cbFile
                         name is used with ".filtered.tsv" appended (default: None)
   -v, --verbose         Extra messages are logged. (default: False)
-  -p P, --processes P   Set the maximum number of processes to use besides the main process. If
-                        not provided, serial processing is used. Note that parallel processing
-                        will produce the following warning for each temp file, which can be
-                        safely ignored: "[E::idx_find_and_load] Could not retrieve index file
-                        for <file>" (default: None)
+  -p P, --processes P   Set the maximum number of processes to use besides the main process.
+                        If not provided, serial processing is used. Note that parallel
+                        processing will produce the following warning for each temp file,
+                        which can be safely ignored: "[E::idx_find_and_load] Could not
+                        retrieve index file for <file>" (default: None)
 ```
 
 ### Example
